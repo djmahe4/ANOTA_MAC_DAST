@@ -3200,6 +3200,12 @@ main_loop:
             Py_DECREF(empty);
             if (str == NULL)
                 goto error;
+
+            /* ANOTA_TAINT: propagate from any segment. */
+            for (Py_ssize_t i = 1; i <= oparg; i++) {
+                _PyAnotaTaint_Propagate(PEEK(i), str);
+            }
+
             while (--oparg >= 0) {
                 PyObject *item = POP();
                 Py_DECREF(item);
@@ -4427,6 +4433,9 @@ main_loop:
                without conversion. */
             if (conv_fn != NULL) {
                 result = conv_fn(value);
+                if (result != NULL) {
+                    _PyAnotaTaint_Propagate(value, result);
+                }
                 Py_DECREF(value);
                 if (result == NULL) {
                     Py_XDECREF(fmt_spec);
@@ -4446,6 +4455,12 @@ main_loop:
             } else {
                 /* Actually call format(). */
                 result = PyObject_Format(value, fmt_spec);
+                if (result != NULL) {
+                    _PyAnotaTaint_Propagate(value, result);
+                    if (fmt_spec != NULL) {
+                        _PyAnotaTaint_Propagate(fmt_spec, result);
+                    }
+                }
                 Py_DECREF(value);
                 Py_XDECREF(fmt_spec);
                 if (result == NULL) {

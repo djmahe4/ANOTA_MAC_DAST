@@ -19,7 +19,8 @@ import threading
 import time
 import sys
 
-SOCKET_PATH = "/tmp/anota_syscall.sock"
+DEFAULT_SOCKET_PATH = "/tmp/anota_syscall.sock"
+SOCKET_PATH = os.environ.get("ANOTA_SYSCALL_SOCKET", DEFAULT_SOCKET_PATH)
 
 
 class DummyMonitorServer:

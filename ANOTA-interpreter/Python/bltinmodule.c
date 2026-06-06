@@ -2961,6 +2961,7 @@ static PyMethodDef builtin_methods[] = {
     BUILTIN_ORD_METHODDEF
     BUILTIN_POW_METHODDEF
     {"ANOTA_TAINT",     (PyCFunction)_PyAnota_Taint,                     METH_VARARGS | METH_KEYWORDS, NULL},
+    {"ANOTA_TAINT_CLEAR", (PyCFunction)_PyAnota_Taint_Clear,             METH_NOARGS, NULL},
     {"ANOTA_SYSCALL_SIGNAL_START", (PyCFunction)_PyAnotaSyscall_SignalStart,
      METH_VARARGS | METH_KEYWORDS, anota_syscall_signal_start_doc},
     {"ANOTA_SYSCALL_SIGNAL_STOP", (PyCFunction)_PyAnotaSyscall_SignalStop,

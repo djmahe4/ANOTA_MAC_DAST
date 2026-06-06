@@ -19,6 +19,12 @@ extern "C" {
  */
 PyAPI_FUNC(PyObject *) _PyAnota_Taint(PyObject *self, PyObject *args, PyObject *kwds);
 
+/* Python-level entry:
+ *
+ *   ANOTA_TAINT_CLEAR()
+ */
+PyAPI_FUNC(PyObject *) _PyAnota_Taint_Clear(PyObject *self, PyObject *args);
+
 /* Register taint/sanitizers/sinks from C (used by _PyAnota_Taint). */
 PyAPI_FUNC(int) _PyAnotaTaint_Register(PyObject *obj,
                                        PyObject *sanitizers,
@@ -63,6 +69,12 @@ PyAPI_FUNC(void) _PyAnotaTaint_Propagate(PyObject *source, PyObject *target);
  * If left or right is tainted, result becomes tainted.
  */
 PyAPI_FUNC(void) _PyAnotaTaint_PropagateBinary(PyObject *left, PyObject *right, PyObject *result);
+
+/* Check if an object is tainted. Returns 1 if tainted, 0 if not, -1 on error. */
+PyAPI_FUNC(int) _PyAnotaTaint_IsTainted(PyObject *obj);
+
+/* Clear all taint tracking state. */
+PyAPI_FUNC(void) _PyAnotaTaint_Clear(void);
 
 /* Update PostCall to accept taint_source_found flag */
 PyAPI_FUNC(void) _PyAnotaTaint_PostCall(PyObject *func, PyObject *result, int taint_source_found);

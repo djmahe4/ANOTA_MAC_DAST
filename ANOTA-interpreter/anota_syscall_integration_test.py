@@ -24,7 +24,8 @@ import subprocess
 import time
 from pathlib import Path
 
-SOCKET_PATH = Path("/tmp/anota_syscall.sock")
+DEFAULT_SOCKET_PATH = "/tmp/anota_syscall.sock"
+SOCKET_PATH = Path(os.environ.get("ANOTA_SYSCALL_SOCKET", DEFAULT_SOCKET_PATH))
 REPO_ROOT = Path(__file__).resolve().parent
 SYSCALL_MODULE = REPO_ROOT / "syscall-module"
 DAEMON_PATH = SYSCALL_MODULE / "target" / "debug" / "syscall-tracepoint"

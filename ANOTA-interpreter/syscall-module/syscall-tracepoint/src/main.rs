@@ -53,12 +53,13 @@ async fn main() -> Result<(), anyhow::Error> {
 
     write_watch_config(&mut bpf, false, None)?;
 
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<MonitorCommand>(16);
-    let socket_path = PathBuf::from(CONTROL_SOCKET_PATH);
+    let socket_path_str = env::var("ANOTA_SYSCALL_SOCKET")
+        .unwrap_or_else(|_| CONTROL_SOCKET_PATH.to_string());
+    let socket_path = PathBuf::from(&socket_path_str);
     let server_handle = tokio::spawn(run_control_server(socket_path.clone(), cmd_tx.clone()));
     info!(
         "Waiting for control commands on {} (use START [pid]/STOP)",
-        CONTROL_SOCKET_PATH
+        socket_path_str
     );
 
     loop {

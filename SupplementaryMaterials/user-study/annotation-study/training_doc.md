@@ -1,4 +1,4 @@
-# User Study Documetnation
+# User Study Documentation
 ## Introduction
 Welcome to the ANOTA user study. ANOTA is a framework designed to detect business logic vulnerabilities by allowing users to define the application's intended behavior through annotations.
 Your goal is not to fix the bugs in the code. Your goal is to define the security policy of the application using annotations.

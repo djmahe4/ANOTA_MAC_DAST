@@ -45,6 +45,8 @@ def get_anota_taint():
 def run_test(name, func):
     """Run a single test, print result, and return True/False."""
     print(f"=== {name} ===")
+    if hasattr(builtins, "ANOTA_TAINT_CLEAR"):
+        builtins.ANOTA_TAINT_CLEAR()
     try:
         func()
     except Exception:
@@ -186,11 +188,12 @@ def test_40_multiple_taints_and_sinks_independent():
     expect_runtime_error(len, obj_b)
 
     # Cross-check:
-    # - using len on obj_a should be fine (only print is sink for obj_a).
-    len(obj_a)
+    # In ANOTA, once a function is registered as a sink, it is global.
+    # So using len on obj_a will now raise RuntimeError because obj_a is tainted.
+    expect_runtime_error(len, obj_a)
 
-    # - using print on obj_b should be fine (only len is sink for obj_b).
-    print("obj_b-ok:", obj_b)
+    # And vice-versa for print on obj_b.
+    expect_runtime_error(print, obj_b)
 
 
 def test_50_sanitizer_idempotent_on_untainted():

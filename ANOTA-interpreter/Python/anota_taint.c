@@ -6,7 +6,7 @@
  *
  * Model:
  *   - A global mapping of tainted objects:
- *         taint_objects: { obj -> True }
+ *         taint_objects: { id(obj) -> True }
  *   - A global mapping of sanitizer functions:
  *         sanitizers: { func -> True }
  *   - A global mapping of sink functions:
@@ -17,6 +17,9 @@
  *       * Marks 'obj' as tainted.
  *       * Registers sanitizer functions and sink functions.
  *
+ *   - ANOTA_TAINT_CLEAR()
+ *       * Resets all taint engine state.
+ *
  *   - _PyAnotaTaint_CheckVectorcall(...) and _PyAnotaTaint_CheckTupleDictCall(...)
  *       * Called from ceval.c before calling 'func'.
  *       * If 'func' is a registered sink and any arg is tainted, raise.
@@ -26,15 +29,14 @@
  *       * If 'func' is a registered sanitizer, clear taint on 'result'.
  *
  * Notes / limitations:
- *   - Taint is tracked per-object and only for objects that are hashable,
- *     since we store them as dictionary keys. Attempting to taint an
- *     unhashable object currently raises a TypeError.
+ *   - Taint is tracked per-object address (ID) to avoid infinite recursion
+ *     during hash/eq calls and support unhashable objects.
  *   - We do not automatically propagate taint to derived values: only
  *     values explicitly passed to ANOTA_TAINT() are tracked as tainted.
  *   - Sanitizers clear taint on their return value only.
  */
 
-static PyObject *taint_objects = NULL;    /* { obj -> True } */
+static PyObject *taint_objects = NULL;    /* { id(obj) -> True } */
 static PyObject *taint_sanitizers = NULL; /* { func -> True } */
 static PyObject *taint_sinks = NULL;      /* { func -> True } */
 
@@ -68,17 +70,15 @@ ensure_state(void)
 static int
 is_tainted(PyObject *obj)
 {
-    if (taint_objects == NULL) {
+    if (taint_objects == NULL || obj == NULL) {
         return 0;
     }
-    int contains = PyDict_Contains(taint_objects, obj);
-    if (contains < 0) {
-        if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-            PyErr_Clear();
-            return 0;
-        }
+    PyObject *id_obj = PyLong_FromVoidPtr(obj);
+    if (id_obj == NULL) {
         return -1;
     }
+    int contains = PyDict_Contains(taint_objects, id_obj);
+    Py_DECREF(id_obj);
     return contains;
 }
 
@@ -89,15 +89,33 @@ mark_tainted(PyObject *obj)
     if (ensure_state() < 0) {
         return -1;
     }
+    if (obj == NULL) return 0;
+    PyObject *id_obj = PyLong_FromVoidPtr(obj);
+    if (id_obj == NULL) {
+        return -1;
+    }
+    int res = PyDict_SetItem(taint_objects, id_obj, Py_True);
+    Py_DECREF(id_obj);
+    return res;
+}
 
-    int res = PyDict_SetItem(taint_objects, obj, Py_True);
+/* Unmark obj as tainted. Returns 0 on success, -1 on error. */
+static int
+unmark_tainted(PyObject *obj)
+{
+    if (taint_objects == NULL || obj == NULL) {
+        return 0;
+    }
+    PyObject *id_obj = PyLong_FromVoidPtr(obj);
+    if (id_obj == NULL) {
+        return -1;
+    }
+    int res = PyDict_DelItem(taint_objects, id_obj);
+    Py_DECREF(id_obj);
     if (res < 0) {
-        /* Most likely: unhashable object. Give a clearer error. */
-        if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+        if (PyErr_ExceptionMatches(PyExc_KeyError)) {
             PyErr_Clear();
-            PyErr_SetString(PyExc_TypeError,
-                            "ANOTA_TAINT only supports hashable objects "
-                            "as taint sources");
+            return 0;
         }
         return -1;
     }
@@ -141,6 +159,20 @@ register_funcs_from_seq(PyObject *seq, PyObject *target_dict,
 }
 
 /* --- public registration helpers -------------------------------------- */
+
+void
+_PyAnotaTaint_Clear(void)
+{
+    if (taint_objects != NULL) {
+        PyDict_Clear(taint_objects);
+    }
+    if (taint_sanitizers != NULL) {
+        PyDict_Clear(taint_sanitizers);
+    }
+    if (taint_sinks != NULL) {
+        PyDict_Clear(taint_sinks);
+    }
+}
 
 int
 _PyAnotaTaint_Register(PyObject *obj, PyObject *sanitizers, PyObject *sinks)
@@ -193,7 +225,14 @@ _PyAnota_Taint(PyObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
-/* --- sink checks for various call paths ------------------------------- */
+PyObject *
+_PyAnota_Taint_Clear(PyObject *self, PyObject *args)
+{
+    (void)self;
+    (void)args;
+    _PyAnotaTaint_Clear();
+    Py_RETURN_NONE;
+}
 
 /* --- sink checks for various call paths ------------------------------- */
 
@@ -210,6 +249,41 @@ is_sink(PyObject *func)
     return contains;
 }
 
+/* Recursively check if an object or its elements are tainted.
+ * Currently checks one level deep for common containers.
+ */
+static int
+deep_is_tainted(PyObject *obj)
+{
+    if (obj == NULL) return 0;
+    int ta = is_tainted(obj);
+    if (ta != 0) return ta;
+
+    if (PyList_Check(obj)) {
+        Py_ssize_t size = PyList_GET_SIZE(obj);
+        for (Py_ssize_t i = 0; i < size; i++) {
+            int item_ta = is_tainted(PyList_GET_ITEM(obj, i));
+            if (item_ta != 0) return item_ta;
+        }
+    }
+    else if (PyTuple_Check(obj)) {
+        Py_ssize_t size = PyTuple_GET_SIZE(obj);
+        for (Py_ssize_t i = 0; i < size; i++) {
+            int item_ta = is_tainted(PyTuple_GET_ITEM(obj, i));
+            if (item_ta != 0) return item_ta;
+        }
+    }
+    else if (PyDict_Check(obj)) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(obj, &pos, &key, &value)) {
+            int val_ta = is_tainted(value);
+            if (val_ta != 0) return val_ta;
+        }
+    }
+    return 0;
+}
+
 /* Returns 1 if any arg is tainted, 0 if none, -1 on error.
  * If func is a sink and arg is tainted, raises error and returns -1.
  */
@@ -224,7 +298,7 @@ check_args_for_taint(PyObject *func, PyObject *const *stack,
     int found_taint = 0;
     for (Py_ssize_t i = 0; i < total_args; i++) {
         PyObject *arg = stack[i];
-        int ta = is_tainted(arg);
+        int ta = deep_is_tainted(arg);
         if (ta < 0) {
             return -1;
         }
@@ -254,7 +328,7 @@ check_tuple_for_taint(PyObject *func, PyObject *tuple, int is_sink_func)
     Py_ssize_t n = PyTuple_GET_SIZE(tuple);
     for (Py_ssize_t i = 0; i < n; i++) {
         PyObject *arg = PyTuple_GET_ITEM(tuple, i);
-        int ta = is_tainted(arg);
+        int ta = deep_is_tainted(arg);
         if (ta < 0) {
             return -1;
         }
@@ -285,7 +359,7 @@ check_dict_values_for_taint(PyObject *func, PyObject *dict, int is_sink_func)
     int found_taint = 0;
 
     while (PyDict_Next(dict, &pos, &key, &value)) {
-        int ta = is_tainted(value);
+        int ta = deep_is_tainted(value);
         if (ta < 0) {
             return -1;
         }
@@ -372,6 +446,13 @@ is_sanitizer(PyObject *func)
     return contains;
 }
 
+/* Check if an object is tainted. Returns 1 if tainted, 0 if not, -1 on error. */
+int
+_PyAnotaTaint_IsTainted(PyObject *obj)
+{
+    return is_tainted(obj);
+}
+
 /* Called from ceval.c when a call returns successfully. */
 void
 _PyAnotaTaint_PostCall(PyObject *func, PyObject *result, int taint_source_found)
@@ -389,14 +470,8 @@ _PyAnotaTaint_PostCall(PyObject *func, PyObject *result, int taint_source_found)
 
     if (sani) {
         /* Sanitizer: remove taint from result if present */
-        if (PyDict_DelItem(taint_objects, result) < 0) {
-            if (PyErr_ExceptionMatches(PyExc_KeyError) ||
-                PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-            }
-            else {
-                PyErr_Clear();
-            }
+        if (unmark_tainted(result) < 0) {
+            PyErr_Clear();
         }
     }
     else if (taint_source_found) {

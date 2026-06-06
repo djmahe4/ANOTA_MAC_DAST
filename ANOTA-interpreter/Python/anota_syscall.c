@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <string.h>
 #include "anota_syscall.h"
+#include "anota_taint.h"
 
 #ifndef MS_WINDOWS
 #  include <sys/types.h>
@@ -34,6 +35,11 @@ static int
 send_monitor_command(const char *command, Py_ssize_t length)
 {
 #ifndef MS_WINDOWS
+    const char *socket_path = getenv("ANOTA_SYSCALL_SOCKET");
+    if (socket_path == NULL) {
+        socket_path = ANOTA_SYSCALL_SOCKET_PATH;
+    }
+
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         PyErr_SetFromErrno(PyExc_OSError);
@@ -42,19 +48,19 @@ send_monitor_command(const char *command, Py_ssize_t length)
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    size_t path_len = strlen(ANOTA_SYSCALL_SOCKET_PATH);
+    size_t path_len = strlen(socket_path);
     if (path_len >= sizeof(addr.sun_path)) {
         close(fd);
         PyErr_SetString(PyExc_RuntimeError,
                         "ANOTA_SYSCALL socket path is too long");
         return -1;
     }
-    memcpy(addr.sun_path, ANOTA_SYSCALL_SOCKET_PATH, path_len + 1);
+    memcpy(addr.sun_path, socket_path, path_len + 1);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(fd);
         PyErr_SetFromErrnoWithFilename(PyExc_OSError,
-                                       ANOTA_SYSCALL_SOCKET_PATH);
+                                       socket_path);
         return -1;
     }
 
@@ -74,9 +80,9 @@ send_monitor_command(const char *command, Py_ssize_t length)
         remaining -= wrote;
     }
 
-    /* Best-effort read response (ignored). */
+    /* Best-effort read response (ignored). Use MSG_DONTWAIT to avoid hanging. */
     char response[64];
-    (void)recv(fd, response, sizeof(response), 0);
+    (void)recv(fd, response, sizeof(response), MSG_DONTWAIT);
     close(fd);
     return 0;
 #else
@@ -1200,6 +1206,10 @@ _PyAnotaSyscall_Check(const char *syscall_name,
     int target_kind = parse_target_kind_name(target_kind_name);
 
     if (target_obj != NULL) {
+        if (_PyAnotaTaint_IsTainted(target_obj) > 0) {
+            reason = "tainted target object reached syscall";
+            goto violation;
+        }
         target_text = normalize_target_value(target_obj, target_kind);
         if (target_text == NULL) {
             goto error;
