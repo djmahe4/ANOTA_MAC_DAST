@@ -31,6 +31,9 @@ PyAPI_FUNC(int) _PyAnota_CheckWriteMember(PyThreadState *tstate,
                                           PyObject *container,
                                           PyObject *key);
 
+/* Called by _Py_Dealloc to clear policies for an object being destroyed. */
+PyAPI_FUNC(void) _PyAnotaWatch_NotifyDealloc(PyObject *obj);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,46 +1,62 @@
-#!/usr/bin/env python3
-"""Exercise taint propagation through a nested helper and sink."""
+"""
+test_nested_sink.py
 
-def sink(x):
-    """Sink used by this smoke test."""
-    print(f"Sink called with: {x}")
+Test that taint propagates through nested containers.
+Currently, deep_is_tainted only checks one level deep.
+"""
 
-def process_data(data):
-    """Forward data to the sink to mimic a nested call."""
-    print(f"Processing data: {data}")
-    # Direct sink call; expected to fail if data is tainted.
-    sink(data)
-    print("Processing completed successfully")
+import builtins
+import sys
 
-def main():
-    print("=" * 60)
-    print("Test: Taint propagation through function argument to sink")
-    print("=" * 60)
+def get_anota_taint():
+    return builtins.ANOTA_TAINT
+
+def test_nested_list():
+    print("=== test_nested_list ===")
+    taint = get_anota_taint()
+    builtins.ANOTA_TAINT_CLEAR()
     
-    # Prepare a tainted input.
-    tainted_value = 42
-    ANOTA_TAINT(tainted_value, Sink=[sink])
-    print(f"✓ Marked {tainted_value} as tainted with sink={sink.__name__}")
+    # Register print as a sink
+    taint("dummy", Sink=[print])
     
-    print("\nCalling process_data(tainted_value)...")
-    print("Expected: RuntimeError should be raised when sink() is called inside process_data()")
-    print()
+    source = "secret"
+    taint(source)
+    
+    nested = [[source]]
+    print(f"Checking if nested list is blocked: {nested}")
     
     try:
-        process_data(tainted_value)
-        print("\n❌ FAIL: No error was raised!")
-        print("   The taint analysis did NOT detect the violation.")
-    except RuntimeError as e:
-        print(f"\n✅ SUCCESS: RuntimeError was raised as expected!")
-        print(f"   Error message: {e}")
-        print("   The taint analysis correctly detected that:")
-        print("   1. tainted_value was passed to process_data()")
-        print("   2. Inside process_data(), the tainted argument was passed to sink()")
-        print("   3. This violated the taint policy and raised an error")
+        print(nested)
+        raise AssertionError("Nested tainted list should have been blocked!")
+    except RuntimeError:
+        print("Nested list successfully blocked (Correct behavior)")
+
+def test_nested_dict():
+    print("=== test_nested_dict ===")
+    taint = get_anota_taint()
+    builtins.ANOTA_TAINT_CLEAR()
+    
+    taint("dummy", Sink=[print])
+    
+    source = "secret"
+    taint(source)
+    
+    nested = {"a": {"b": source}}
+    print(f"Checking if nested dict is blocked: {nested}")
+    
+    try:
+        print(nested)
+        raise AssertionError("Nested tainted dict should have been blocked!")
+    except RuntimeError:
+        print("Nested dict successfully blocked (Correct behavior)")
 
 if __name__ == "__main__":
     try:
-        main()
-    except NameError as e:
-        print(f"Error: {e}")
-        print("This script requires the ANOTA interpreter with ANOTA_TAINT support.")
+        test_nested_list()
+    except Exception as e:
+        print(f"test_nested_list FAILED: {e}")
+        
+    try:
+        test_nested_dict()
+    except Exception as e:
+        print(f"test_nested_dict FAILED: {e}")

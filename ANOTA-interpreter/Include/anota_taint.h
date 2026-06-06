@@ -76,6 +76,9 @@ PyAPI_FUNC(int) _PyAnotaTaint_IsTainted(PyObject *obj);
 /* Clear all taint tracking state. */
 PyAPI_FUNC(void) _PyAnotaTaint_Clear(void);
 
+/* Called by _Py_Dealloc to clear taint for an object being destroyed. */
+PyAPI_FUNC(void) _PyAnotaTaint_NotifyDealloc(PyObject *obj);
+
 /* Update PostCall to accept taint_source_found flag */
 PyAPI_FUNC(void) _PyAnotaTaint_PostCall(PyObject *func, PyObject *result, int taint_source_found);
 

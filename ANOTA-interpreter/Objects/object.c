@@ -14,6 +14,8 @@
 #include "pycore_unionobject.h"   // _PyUnion_Type
 #include "frameobject.h"
 #include "interpreteridobject.h"
+#include "anota_taint.h"
+#include "anota_watch.h"
 
 #ifdef Py_LIMITED_API
    // Prevent recursive call _Py_IncRef() <=> Py_INCREF()
@@ -2294,6 +2296,8 @@ _PyObject_AssertFailed(PyObject *obj, const char *expr, const char *msg,
 void
 _Py_Dealloc(PyObject *op)
 {
+    _PyAnotaTaint_NotifyDealloc(op);
+    _PyAnotaWatch_NotifyDealloc(op);
     destructor dealloc = Py_TYPE(op)->tp_dealloc;
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference(op);
