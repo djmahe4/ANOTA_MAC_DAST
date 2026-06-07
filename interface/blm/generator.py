@@ -40,6 +40,23 @@ class BLMGenerator:
         cov_str = json.dumps(coverage, sort_keys=True)
         return hashlib.sha1(cov_str.encode("utf-8")).hexdigest()
 
+    def add_static_routing_hint(self, route_name, pattern, script_path):
+        """
+        Records a routing rule as a static hint.
+        """
+        hint_value = {
+            "pattern": pattern,
+            "script": script_path
+        }
+        self.db.save_static_hint("routing", route_name, hint_value)
+
+    def add_openapi_hint(self, path, method, details):
+        """
+        Records an API endpoint from an OpenAPI spec.
+        """
+        key = f"{method.upper()} {path}"
+        self.db.save_static_hint("openapi", key, details)
+
     def ingest(self, telemetry_item, action_name="unknown"):
         """
         Processes a single telemetry item, recording the observation and updating transitions.

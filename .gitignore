@@ -130,4 +130,4 @@ baks/anota-interpreter/python
 baks/syscall-module/target/
 baks/syscall-module/**/target/
 
-Data/
+data/

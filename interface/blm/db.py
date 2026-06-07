@@ -50,7 +50,26 @@ class BLMDatabase:
                 FOREIGN KEY(to_state_id) REFERENCES states(id)
             )
         """)
+
+        # 4. Static Hints: Metadata from OpenAPI, DB schemas, etc.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS static_hints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL, -- 'openapi', 'db_schema', 'routing'
+                key TEXT NOT NULL,
+                value TEXT NOT NULL, -- JSON content
+                UNIQUE(type, key)
+            )
+        """)
         
+        self.conn.commit()
+
+    def save_static_hint(self, hint_type, key, value_dict):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO static_hints (type, key, value)
+            VALUES (?, ?, ?)
+        """, (hint_type, key, json.dumps(value_dict)))
         self.conn.commit()
 
     def save_observation(self, observation):
