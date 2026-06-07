@@ -10,5 +10,6 @@ user = ["aya"]
 [dependencies]
 aya = { version = "0.13", optional = true }
 aya-ebpf = { version = "0.1", default-features = false, package = "aya-ebpf" }
+bytemuck = { version = "1.16", features = ["derive"] }
 [lib]
 path = "src/lib.rs"

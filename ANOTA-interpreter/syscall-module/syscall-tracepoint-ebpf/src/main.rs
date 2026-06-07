@@ -4,12 +4,18 @@ mod process;
 mod file;
 
 use aya_ebpf::{
-    macros::tracepoint,
-    programs::TracePointContext,
-    
-    
+    macros::{tracepoint, uprobe},
+    programs::{TracePointContext, ProbeContext},
+    EbpfContext,
 };
-// use aya_log_ebpf::info;
+use aya_log_ebpf::info;
+
+#[uprobe]
+pub fn generic_uprobe(ctx: ProbeContext) -> u32 {
+    let pid = ctx.pid();
+    info!(&ctx, "uprobe hit by PID {}", pid);
+    0
+}
 
 #[tracepoint]
 pub fn enter_access(ctx: TracePointContext) -> u32 {

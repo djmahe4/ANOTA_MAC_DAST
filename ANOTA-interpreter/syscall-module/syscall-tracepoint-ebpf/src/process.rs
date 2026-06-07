@@ -1,4 +1,4 @@
-use aya_ebpf::{programs::TracePointContext,helpers::bpf_probe_read_user_str_bytes,BpfContext};
+use aya_ebpf::{programs::TracePointContext,helpers::bpf_probe_read_user_str_bytes,EbpfContext};
 use syscall_tracepoint_common::{BUF, WATCH_CONFIG, MAX_PATH};
 use aya_log_ebpf::info;
 

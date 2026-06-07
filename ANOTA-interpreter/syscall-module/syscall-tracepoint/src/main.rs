@@ -3,9 +3,10 @@ mod file;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
-use aya::{include_bytes_aligned, Bpf};
+use aya::{include_bytes_aligned, Ebpf};
+use aya::programs::UProbe;
 use aya::maps::Array;
-use aya_log::BpfLogger;
+use aya_log::EbpfLogger;
 use log::{info, warn, debug, error};
 use std::env;
 
@@ -23,6 +24,7 @@ const CONTROL_SOCKET_PATH: &str = "/tmp/anota_syscall.sock";
 enum MonitorCommand {
     Start { pid: Option<u32> },
     Stop,
+    UProbe { path: String, function: String },
 }
 
 #[tokio::main]
@@ -32,16 +34,18 @@ async fn main() -> Result<(), anyhow::Error> {
     bump_memlock_limit();
 
     #[cfg(debug_assertions)]
-    let mut bpf = Bpf::load(include_bytes_aligned!(
+    let mut bpf = Ebpf::load(include_bytes_aligned!(
         "../../target/bpfel-unknown-none/debug/syscall-tracepoint"
     ))?;
     #[cfg(not(debug_assertions))]
-    let mut bpf = Bpf::load(include_bytes_aligned!(
+    let mut bpf = Ebpf::load(include_bytes_aligned!(
         "../../target/bpfel-unknown-none/release/syscall-tracepoint"
     ))?;
-    if let Err(e) = BpfLogger::init(&mut bpf) {
+    if let Err(e) = EbpfLogger::init(&mut bpf) {
         warn!("failed to initialize eBPF logger: {}", e);
     }
+
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<MonitorCommand>(16);
 
     let skip_ebpf = env::var_os("ANOTA_SYSCALL_SKIP_EBPF").is_some();
     if skip_ebpf {
@@ -58,7 +62,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let socket_path = PathBuf::from(&socket_path_str);
     let server_handle = tokio::spawn(run_control_server(socket_path.clone(), cmd_tx.clone()));
     info!(
-        "Waiting for control commands on {} (use START [pid]/STOP)",
+        "Waiting for control commands on {} (use START [pid]/STOP/UPROBE <path> <func>)",
         socket_path_str
     );
 
@@ -102,7 +106,7 @@ fn bump_memlock_limit() {
     }
 }
 
-fn apply_command(command: MonitorCommand, bpf: &mut Bpf) -> anyhow::Result<()> {
+fn apply_command(command: MonitorCommand, bpf: &mut Ebpf) -> anyhow::Result<()> {
     match command {
         MonitorCommand::Start { pid } => {
             write_watch_config(bpf, true, pid)?;
@@ -116,12 +120,20 @@ fn apply_command(command: MonitorCommand, bpf: &mut Bpf) -> anyhow::Result<()> {
             write_watch_config(bpf, false, None)?;
             info!("monitoring disabled");
         }
+        MonitorCommand::UProbe { path, function } => {
+            let program: &mut UProbe = bpf.program_mut("generic_uprobe")
+                .ok_or_else(|| anyhow::anyhow!("generic_uprobe not found"))?
+                .try_into()?;
+            program.load()?;
+            program.attach(Some(&function), 0, &path, None)?;
+            info!("attached uprobe to {} in {}", function, path);
+        }
     }
     Ok(())
 }
 
-fn write_watch_config(bpf: &mut Bpf, enabled: bool, pid: Option<u32>) -> anyhow::Result<()> {
-    let mut array: Array<_, WatchConfig> = Array::try_from(bpf.map_mut("WATCH_CONFIG")?)?;
+fn write_watch_config(bpf: &mut Ebpf, enabled: bool, pid: Option<u32>) -> anyhow::Result<()> {
+    let mut array: Array<_, WatchConfig> = Array::try_from(bpf.map_mut("WATCH_CONFIG").ok_or_else(|| anyhow::anyhow!("WATCH_CONFIG map not found"))?)?;
     let config = WatchConfig {
         enabled: if enabled { 1 } else { 0 },
         target_pid: pid.unwrap_or(0),
@@ -186,6 +198,11 @@ fn parse_command(line: &str) -> Result<MonitorCommand, String> {
             }
         }
         Some(cmd) if cmd.eq_ignore_ascii_case("STOP") => Ok(MonitorCommand::Stop),
+        Some(cmd) if cmd.eq_ignore_ascii_case("UPROBE") => {
+            let path = parts.next().ok_or_else(|| "missing path".to_string())?.to_string();
+            let function = parts.next().ok_or_else(|| "missing function".to_string())?.to_string();
+            Ok(MonitorCommand::UProbe { path, function })
+        }
         Some(other) => Err(format!("unknown command '{other}'")),
         None => Err("empty command".to_string()),
     }
