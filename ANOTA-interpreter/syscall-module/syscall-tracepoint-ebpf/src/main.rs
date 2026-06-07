@@ -6,14 +6,49 @@ mod file;
 use aya_ebpf::{
     macros::{tracepoint, uprobe},
     programs::{TracePointContext, ProbeContext},
+    helpers::bpf_probe_read_user_str_bytes,
     EbpfContext,
 };
 use aya_log_ebpf::info;
+use syscall_tracepoint_common::BUF;
 
 #[uprobe]
 pub fn generic_uprobe(ctx: ProbeContext) -> u32 {
     let pid = ctx.pid();
-    info!(&ctx, "uprobe hit by PID {}", pid);
+    
+    // Attempt to extract the first argument as a string
+    // In x86_64, the first arg is in %rdi, which ctx.arg(0) should map to.
+    let arg0: *const u8 = match ctx.arg(0) {
+        Some(ptr) => ptr,
+        None => {
+            info!(&ctx, "uprobe hit by PID {} (no arg0 found)", pid);
+            return 0;
+        }
+    };
+
+    // Get a per-CPU buffer to avoid stack overflow
+    let buf = unsafe {
+        match BUF.get_ptr_mut(0) {
+            Some(ptr) => &mut *ptr,
+            None => return 0,
+        }
+    };
+
+    // Safely read string from user space
+    let res = unsafe {
+        bpf_probe_read_user_str_bytes(arg0, &mut buf.buf)
+    };
+
+    match res {
+        Ok(bytes) => {
+            let s = unsafe { core::str::from_utf8_unchecked(bytes) };
+            info!(&ctx, "uprobe PID {} arg: {}", pid, s);
+        }
+        Err(_) => {
+            info!(&ctx, "uprobe PID {} (read error)", pid);
+        }
+    }
+
     0
 }
 

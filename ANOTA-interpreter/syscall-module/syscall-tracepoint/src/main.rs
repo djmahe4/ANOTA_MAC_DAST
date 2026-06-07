@@ -35,11 +35,11 @@ async fn main() -> Result<(), anyhow::Error> {
 
     #[cfg(debug_assertions)]
     let mut bpf = Ebpf::load(include_bytes_aligned!(
-        "../../target/bpfel-unknown-none/debug/syscall-tracepoint"
+        "../../target/bpfel-unknown-none/debug/syscall-tracepoint-ebpf"
     ))?;
     #[cfg(not(debug_assertions))]
     let mut bpf = Ebpf::load(include_bytes_aligned!(
-        "../../target/bpfel-unknown-none/release/syscall-tracepoint"
+        "../../target/bpfel-unknown-none/release/syscall-tracepoint-ebpf"
     ))?;
     if let Err(e) = EbpfLogger::init(&mut bpf) {
         warn!("failed to initialize eBPF logger: {}", e);
