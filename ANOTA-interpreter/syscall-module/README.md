@@ -1,48 +1,55 @@
-# syscall-tracepoint
+# syscall-tracepoint (MAC-DAST Extended)
 
 ## Prerequisites
 
-1. Install Rust nightly (once): `rustup toolchain install nightly`
-2. Install `bpf-linker`: `cargo +nightly install bpf-linker`
-3. (Already done in this repo) The Aya framework is vendored under `aya-src/`, so
-   building does not require network access. If you ever need to refresh it,
-   clone https://github.com/aya-rs/aya into that directory manually.
+1. Install Rust nightly: `rustup toolchain install nightly`
+2. Install `bpf-linker` from source (to ensure LLVM 22 compatibility):
+   ```bash
+   cargo +nightly install --git https://github.com/aya-rs/bpf-linker bpf-linker --branch main --force
+   ```
+3. Set up the workspace toolchain:
+   ```bash
+   # In ANOTA-interpreter/syscall-module/
+   cat > rust-toolchain.toml <<EOF
+   [toolchain]
+   channel = "nightly"
+   components = ["rust-src"]
+   targets = ["x86_64-unknown-linux-gnu"]
+   EOF
+   ```
 
 ## Build eBPF
 
 ```bash
-cargo +nightly xtask build-ebpf
+cargo run --package xtask -- build-ebpf --release
 ```
 
-To perform a release build you can use the `--release` flag.
-You may also change the target architecture with the `--target` flag.
+This command uses the `xtask` build runner to compile the eBPF kernel object for the `bpfel` target with full optimizations (LTO, high opt-level), which are required for complex argument extraction logic.
 
 ## Build Userspace
 
 ```bash
-cargo +nightly build
+cargo build --package syscall-tracepoint --release
 ```
 
 ## Run
 
 ```bash
-RUST_LOG=info cargo +nightly xtask run
+RUST_LOG=info sudo ./target/release/syscall-tracepoint
 ```
 
-The userspace daemon now exposes a UNIX domain control socket at `/tmp/anota_syscall.sock`.
-Send textual commands to start/stop monitoring:
+The userspace daemon exposes a UNIX domain control socket at `/tmp/anota_syscall.sock`. MAC-DAST extends the original protocol with dynamic uprobe support:
 
 ```
-START            # enable tracing for every process
-START <pid>      # enable tracing only for the specified PID
-STOP             # disable tracing
+START                     # Enable tracing for every process
+START <pid>               # Enable tracing only for the specified PID
+STOP                      # Disable tracing
+UPROBE <path> <function>  # Dynamically attach an eBPF uprobe to the specified binary/symbol
 ```
 
-Each command should be terminated by `\n`. The daemon replies with either `OK` or `ERR ...`.
+### Argument Extraction
 
-In CPython, the helper functions `ANOTA_SYSCALL_SIGNAL_START` / `ANOTA_SYSCALL_SIGNAL_STOP` can
-connect to this socket and send `START <os.getpid()>` or `STOP` to bracket the region that needs
-syscall monitoring.
+When a `UPROBE` is triggered, the eBPF handler automatically attempts to extract the first function argument as a string from user-space memory (using `bpf_probe_read_user_str`). The extracted data is emitted via `aya-log` and collected by the user-space tracer.
 
 ### Development Shortcut
 

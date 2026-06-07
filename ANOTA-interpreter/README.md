@@ -2,6 +2,20 @@
 
 This repository extends CPython 3.10 with a family of ANOTA security hooks. The goal of this document is to describe each component’s purpose, public interface, the available test scripts, and explain how to build the instrumented interpreter.
 
+## Hardening & Stability (MAC-DAST Fork)
+
+This fork introduces significant hardening to the original ANOTA base:
+
+- **C-Level Hashtables**: `ANOTA_TAINT` and `ANOTA_WATCH` now use `_Py_hashtable_t` instead of Python dictionaries. This prevents infinite recursion during hash checks and provides native support for **unhashable objects** (e.g., lists, dicts, custom objects).
+- **Dealloc Hooks**: Injected `NotifyDealloc` triggers into `Objects/object.c`. Policies and taint metadata are now automatically cleared when an object is destroyed, preventing **address-reuse vulnerabilities**.
+- **Recursion Guards**: All C hooks implement recursion protection and error state preservation (`PyErr_Fetch`/`Restore`) to ensure interpreter stability during complex object deallocations.
+- **Enhanced Propagation**: Patched `ceval.c` (`FORMAT_VALUE`, `BUILD_STRING`) to ensure taint is correctly propagated through f-strings and string joins.
+
+### New APIs
+
+- `ANOTA_TAINT_CLEAR()`: Resets the global taint table.
+- `deep_is_tainted(obj)`: Recursively checks nested containers (lists-in-lists, dicts) for tainted members with cycle detection.
+
 ## Building the Interpreter
 
 The project follows CPython’s normal build layout. The steps below assume a Debian/Ubuntu-style environment; adjust package names as needed for other platforms.

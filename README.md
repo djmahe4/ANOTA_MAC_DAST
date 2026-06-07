@@ -1,27 +1,33 @@
-# Anota: Identifying Business Logic Vulnerabilities via Annotation-Based Sanitization
+# ANOTA MAC-DAST: Multi-Agent Context-Aware Dynamic Application Security Testing
 
-This repository contains the full artifact for the ANOTA paper. Each subdirectory ships with its own README that documents build steps, test procedures, and evaluation notes. The top-level README stays intentionally high level and simply orients you toward the right component.
+ANOTA MAC-DAST is a hardened and extended fork of the ANOTA framework, specifically designed for **autonomous logic abuse detection**. It combines high-performance C-level instrumentation with a multi-agent telemetry aggregation layer to build formal Business Logic Models (BLM) and synthesize complex multi-step exploits.
+
+This repository contains the full artifact for the MAC-DAST framework, extending the original ANOTA paper's base with enhanced stability, support for unhashable objects, and a dual PHP/C++ telemetry harness.
+
+---
+
+## Key Enhancements in MAC-DAST
+
+- **Hardened Instrumentation Base**: Refactored `ANOTA_TAINT` and `ANOTA_WATCH` to use high-performance C hashtables (`_Py_hashtable_t`). This provides support for unhashable objects and prevents infinite recursion during security checks.
+- **Memory Safety & Stability**: Implemented deallocation-aware policy cleanup using `_Py_Dealloc` hooks to prevent address-reuse vulnerabilities. Added recursion guards and error-state preservation to all C-level hooks.
+- **Dynamic eBPF Tracing**: Extended the `syscall-module` with dynamic `UPROBE` support, allowing agents to trace arbitrary C/C++ functions and extract string arguments (e.g., SQL queries, file paths) directly from user-space memory.
+- **Dual-Language Telemetry**: Integrated `PHP_XDEBUG` coverage and state observation alongside the native C/C++ trace harness.
+- **Unified Telemetry Stream**: A specialized `TelemetryAggregator` consolidates coverage, state transitions, and trace events into a unified JSON stream for BLM extraction agents.
 
 ---
 
 ## Directory Overview
 
-- [`ANOTA-interpreter/`](ANOTA-interpreter/) – ANOTA’s CPython 3.10.13 fork that introduces the `ANOTA_EXECUTION`, `ANOTA_WATCH`, `ANOTA_TAINT`, and `ANOTA_SYSCALL` primitives. See `ANOTA-interpreter/README.md` for detailed build and validation instructions.
-- [`ANOTA-interpreter/syscall-module/`](ANOTA-interpreter/syscall-module/) – Rust workspace that provides the eBPF tracepoints used by the syscall policies. Refer to `ANOTA-interpreter/syscall-module/README.md`.
-- [`SupplementaryMaterials/annotation_study_details.md`](SupplementaryMaterials/annotation_study_details.md) – Details about the annotation user study participants, feedback, and results.
-- [`SupplementaryMaterials/cmp-with-DBI/`](SupplementaryMaterials/cmp-with-DBI/) – DynamoRIO and Valgrind memory-tracing baselines plus the scripts used for the performance comparison in the paper.
-- [`SupplementaryMaterials/cmp-with-DBI/perf-data/`](SupplementaryMaterials/cmp-with-DBI/perf-data/) – Supplementary data for performance comparison with DBIs.
-- [`SupplementaryMaterials/cwe_top_40.md`](SupplementaryMaterials/cwe_top_40.md) – Analysis of Anota's support for the CWE Top 40 Security Weaknesses.
-- [`SupplementaryMaterials/perf-benchmark.md`](SupplementaryMaterials/perf-benchmark.md) – Performance evaluation details and benchmark results.
-- [`SupplementaryMaterials/skipped_applications.md`](SupplementaryMaterials/skipped_applications.md) – List of applications skipped in the evaluation and the reasons.
-- [`SupplementaryMaterials/user-study/`](SupplementaryMaterials/user-study/) – Annotation training packet and real-world developer survey materials.
-
+- [`ANOTA-interpreter/`](ANOTA-interpreter/) – Hardened CPython 3.10.13 fork. Includes C-level hashtable refactors and dealloc hooks. See its [README](ANOTA-interpreter/README.md) for build steps.
+- [`ANOTA-interpreter/syscall-module/`](ANOTA-interpreter/syscall-module/) – Extended Rust workspace for eBPF tracing. Now supports dynamic uprobes and string argument extraction. Refer to its [README](ANOTA-interpreter/syscall-module/README.md).
+- [`interface/`](interface/) – **[NEW]** MAC-DAST interface layer. Contains the Telemetry Aggregator, PHP Xdebug harness, and C++ uprobe coordinator.
+- [`SupplementaryMaterials/`](SupplementaryMaterials/) – Original ANOTA evaluation data and user study details.
 
 ---
 
 ## How to Navigate the Artifact
 
-1. Start with `ANOTA-interpreter/README.md` to build the instrumented interpreter and run the ANOTA samples.
-2. Move to `ANOTA-interpreter/syscall-module/README.md` when you need syscall tracing or you want to use it w/o ANOTA's CPython interpreter.
-3. Use the documentation inside `SupplementaryMaterials/cmp-with-DBI/` for the performance comparisons against the DBI memory trace baselines.
-4. Consult `SupplementaryMaterials/user-study/` if you are re-running the annotation study or the real-world developer study survey described in the paper.
+1. **Instrumentation Base**: Start with `ANOTA-interpreter/README.md` to build the hardened interpreter and run the security primitives.
+2. **eBPF Tracing**: Move to `ANOTA-interpreter/syscall-module/README.md` to set up the uprobe and syscall monitoring daemon.
+3. **Telemetry & Aggregation**: Explore `interface/` to see how coverage and state data are consolidated for the MAC-DAST agents.
+4. **Original Artifact**: Consult the `SupplementaryMaterials/` for baseline performance data and the annotation studies described in the original paper.
