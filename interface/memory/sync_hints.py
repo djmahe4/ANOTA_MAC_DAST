@@ -22,11 +22,24 @@ def sync_codebase_hints(repo_path, db_path="data/blm.db", project_name="anota_ta
     php_entries = php_prof.find_entry_points(repo_path)
     for entry in php_entries:
         arch = php_prof.profile_architecture(entry)
+        rel_entry = os.path.relpath(entry, repo_path)
         generator.db.save_static_hint(
             "entry_point", 
-            os.path.relpath(entry, repo_path), 
+            rel_entry, 
             {"type": "php", "architecture": arch}
         )
+        
+        # Discover internal dependencies for this entry point
+        deps = php_prof.get_dependencies(entry)
+        for dep in deps:
+            if dep.startswith(os.path.abspath(repo_path)):
+                rel_dep = os.path.relpath(dep, repo_path)
+                if rel_dep != rel_entry:
+                    generator.db.save_static_hint(
+                        "code_dependency",
+                        f"{rel_entry}->{rel_dep}",
+                        {"from": rel_entry, "to": rel_dep}
+                    )
         
     cpp_entries = cpp_prof.find_entry_points(repo_path)
     for entry in cpp_entries:

@@ -10,7 +10,7 @@ class PHPXdebugParser:
         """
         telemetry = {
             "type": "coverage",
-            "files": {}
+            "coverage": {}
         }
         
         for filename, lines in raw_data.items():
@@ -19,6 +19,6 @@ class PHPXdebugParser:
                 if status == 1
             ]
             executed_lines.sort()
-            telemetry["files"][filename] = executed_lines
+            telemetry["coverage"][filename] = executed_lines
             
         return telemetry

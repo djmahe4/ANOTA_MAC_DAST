@@ -24,16 +24,18 @@ class AttackGenerator:
         context = self.memory.get_context_for_trace(trace_id)
         
         # 2. Extract state summary for prompt
-        source = context["episodic"].get("source", "unknown")
-        state_summary = json.dumps(context["episodic"].get("state_data", {}))
+        episodic = context["episodic"]
+        source = episodic.get("source", "unknown")
+        state_summary = json.dumps(episodic.get("state_data", {}))
         semantic_context = json.dumps(context["semantic"])
+        entry_point = episodic.get("state_data", {}).get("server", {}).get("PHP_SELF", "unknown")
         
         # 3. Construct Prompt
         base_prompt = self.template.format(
             source=source,
+            entry_point=entry_point,
             state_summary=state_summary,
-            semantic_context=semantic_context,
-            blm_graph_fragment="[Querying BLM Transitions...]"
+            semantic_context=semantic_context
         )
         
         # 4. Retry loop for LLM JSON robustness

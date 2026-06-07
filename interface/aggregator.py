@@ -19,8 +19,8 @@ class TelemetryAggregator:
         }
         
         if source == "php":
-            # PHPRunner returns {type, files, state}
-            aggregated["coverage"] = data.get("files", {})
+            # PHPRunner returns {type, coverage, state}
+            aggregated["coverage"] = data.get("coverage", {})
             aggregated["state"] = data.get("state", {})
         elif source == "cpp":
             # CPPHarness returns list of event dicts

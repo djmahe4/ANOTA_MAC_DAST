@@ -44,23 +44,36 @@ class PHPRunner:
         if params:
             run_env["ANOTA_REQUEST_PARAMS"] = json.dumps(params)
 
-        # Command to run PHP with auto-prepend
+        # Command to run PHP with auto-prepend and explicit include_path
+        script_dir = os.path.dirname(script_path)
         cmd = [
             self.php_bin,
             "-d", f"auto_prepend_file={self.instrument_script}",
+            "-d", f"include_path=.:{script_dir}",
             "-d", "xdebug.mode=coverage",
             script_path
         ] + args
+        
+        # Ensure authentication is disabled and use SQLite for mobility
+        run_env["DISABLE_AUTHENTICATION"] = "1"
+        run_env["SQLI_DB"] = "sqlite"
+        run_env["DBMS"] = "sqlite" # Try to bypass the MySQL block
 
         try:
             # Security: subprocess.run with list is safe
+            # We change CWD to the script's directory so relative includes work!
+            script_dir = os.path.dirname(script_path)
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 env=run_env,
-                timeout=30 # Add timeout for production safety
+                cwd=script_dir,
+                timeout=10 # Reduced timeout for faster iteration
             )
+            
+            if result.stderr:
+                print(f" [PHP DEBUG] Stderr: {result.stderr}")
             
             # Try reading from file first
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:

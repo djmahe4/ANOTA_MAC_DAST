@@ -23,7 +23,7 @@ class TestPHPXdebugParser(unittest.TestCase):
         # Expected unified format (Phase 1 output)
         expected = {
             "type": "coverage",
-            "files": {
+            "coverage": {
                 "/var/www/html/index.php": [5, 6, 10]
             }
         }
@@ -43,23 +43,9 @@ class TestPHPRunner(unittest.TestCase):
             print(f"\nPHPRunner Error: {telemetry['error']}")
             
         self.assertEqual(telemetry["type"], "coverage", f"Telemetry: {telemetry}")
-        self.assertIn(fixture_path, telemetry["files"], f"Telemetry: {telemetry}")
-        # In simple.php, line 10 calls greet("World"), which should be executed.
-        # Wait, in simple.php line 10 is actually greet("World")? Let's check the file.
-        # Line 1: <?php
-        # Line 2: // tests/fixtures/simple.php
-        # Line 3: function greet($name) {
-        # Line 4:     if ($name) {
-        # Line 5:         echo "Hello, " . $name;
-        # Line 6:     } else {
-        # Line 7:         echo "Hello, Guest";
-        # Line 8:     }
-        # Line 9: }
-        # Line 10: 
-        # Line 11: greet("World");
-        # Line 12: ?>
-        # My previous test expected 10, but it might be 11.
-        self.assertIn(11, telemetry["files"][fixture_path], f"Telemetry: {telemetry}")
+        self.assertIn(fixture_path, telemetry["coverage"], f"Telemetry: {telemetry}")
+        # simple.php: line 11 calls greet("World")
+        self.assertIn(11, telemetry["coverage"][fixture_path], f"Telemetry: {telemetry}")
 
 if __name__ == "__main__":
     unittest.main()

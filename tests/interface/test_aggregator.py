@@ -10,14 +10,14 @@ class TestTelemetryAggregator(unittest.TestCase):
         aggregator = TelemetryAggregator()
         raw_php_data = {
             "type": "coverage", # From PHPRunner
-            "files": {"index.php": [1, 2, 3]},
+            "coverage": {"index.php": [1, 2, 3]},
             "state": {"session": {"user": "admin"}}
         }
         
         aggregated = aggregator.aggregate("php", raw_php_data)
         
         self.assertEqual(aggregated["source"], "php")
-        self.assertEqual(aggregated["coverage"], raw_php_data["files"])
+        self.assertEqual(aggregated["coverage"], raw_php_data["coverage"])
         self.assertEqual(aggregated["state"], raw_php_data["state"])
         self.assertTrue(uuid.UUID(aggregated["trace_id"]))
         self.assertIn("timestamp", aggregated)

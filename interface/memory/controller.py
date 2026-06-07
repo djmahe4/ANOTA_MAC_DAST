@@ -1,5 +1,6 @@
 import json
 import os
+from threading import Lock
 
 class MemoryController:
     """
@@ -171,35 +172,64 @@ class MemoryController:
     def get_context_for_trace(self, trace_id):
         """
         Consolidates Episodic and Semantic memory for a specific execution trace.
+        Filters codebase metadata to reduce LLM noise and prevents hallucinations.
         """
         # 1. Fetch Episodic Memory (What happened?)
         observation = self._get_observation(trace_id)
         
         # 2. Fetch Semantic Memory (What is the code structure?)
-        # For each file in coverage, get structural hints and clean code
-        files = observation.get("coverage_data", {}).keys()
-        structural_context = []
         from logic_engine.agents.php_profiler import PHPProfiler
         php_prof = PHPProfiler()
+        
+        # Get root path for jail/resolution
+        root = getattr(self.codebase, 'root_path', os.getcwd())
+        # Files hit in trace
+        trace_files = set(observation.get("coverage_data", {}).keys())
+        files_to_inspect = set(trace_files)
 
-        for file_path in files:
-            hints = self.codebase.search_graph(name_pattern=f".*{file_path}.*")
-            
-            # If it's a PHP file, provide a cleaned snippet hint
+        # Add ONLY relevant static dependencies from the DB
+        cursor = self.blm_db.conn.cursor()
+        cursor.execute("SELECT value FROM static_hints WHERE type = 'code_dependency'")
+        dependencies = []
+        for row in cursor.fetchall():
+            dep = json.loads(row[0])
+            # If the entry point OR any covered file is the 'from', add the 'to'
+            if dep["from"] in trace_files:
+                dependencies.append(dep)
+                files_to_inspect.add(dep["to"])
+
+        
+        structural_context = []
+        for file_path in files_to_inspect:
+            # A. Get high-value code summary
             if file_path.endswith(".php"):
-                # Use explicit root_path if available
-                root = getattr(self.codebase, 'root_path', os.getcwd())
                 full_path = os.path.abspath(os.path.join(root, file_path))
-                
                 if os.path.exists(full_path) and full_path.startswith(os.path.abspath(root)):
                     clean_code = php_prof.strip_noise(full_path)
-                    hints.append({"type": "code_summary", "content": clean_code[:1000]}) # Limit size
+                    structural_context.append({
+                        "type": "code_summary", 
+                        "file": file_path,
+                        "content": clean_code[:3000] # Generous limit for logic visibility
+                    })
             
-            structural_context.append(hints)
+            # B. Get filtered graph hints (Focus on importance/connectivity)
+            hints = self.codebase.search_graph(name_pattern=f".*{file_path}.*")
+            if isinstance(hints, list):
+                for h in hints:
+                    # Filter: Only keep nodes with high centrality or that are entry points
+                    if h.get("in_degree", 0) > 1 or h.get("is_entry_point"):
+                        structural_context.append({
+                            "type": "graph_hint",
+                            "name": h.get("name"),
+                            "label": h.get("label"),
+                            "importance": h.get("in_degree"),
+                            "file": h.get("file_path")
+                        })
             
         return {
             "episodic": observation,
-            "semantic": structural_context
+            "semantic": structural_context,
+            "dependencies": dependencies
         }
 
     def _get_observation(self, trace_id):

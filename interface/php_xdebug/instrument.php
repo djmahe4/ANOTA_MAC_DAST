@@ -14,14 +14,41 @@ if (!function_exists('xdebug_start_code_coverage')) {
 /**
  * MAC-DAST: Mock request data if provided via environment
  */
+// Set realistic web defaults for CLI execution
+if (!isset($_SERVER['HTTP_HOST'])) $_SERVER['HTTP_HOST'] = 'localhost';
+if (!isset($_SERVER['SERVER_NAME'])) $_SERVER['SERVER_NAME'] = 'localhost';
+if (!isset($_SERVER['REMOTE_ADDR'])) $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+if (!isset($_SERVER['REQUEST_URI'])) $_SERVER['REQUEST_URI'] = '/';
+
+// Promote specific ENV vars to Cookies (Target compatibility)
+if (getenv('security')) {
+    $_COOKIE['security'] = getenv('security');
+}
+
+// Force Target-Specific Logic Bypasses
+$GLOBALS['DBMS'] = 'SQLite';
+$GLOBALS['SQLI_DB'] = 'sqlite';
+
+// Force Authentication for MAC-DAST analysis
+if (!isset($_SESSION)) $_SESSION = [];
+if (!isset($_SESSION['dvwa'])) $_SESSION['dvwa'] = [];
+$_SESSION['dvwa']['username'] = 'admin';
+$_SESSION['dvwa']['logged_in'] = true;
+
 $mock_params_json = getenv('ANOTA_REQUEST_PARAMS');
 if ($mock_params_json) {
-    $mock_params = json_decode($mock_params_json, true);
-    if ($mock_params) {
-        // Merge into globals
-        $_GET = array_merge($_GET, $mock_params);
-        $_POST = array_merge($_POST, $mock_params);
-        $_REQUEST = array_merge($_REQUEST, $mock_params);
+    $mock_data = json_decode($mock_params_json, true);
+    if ($mock_data) {
+        // Correctly route GET and POST parameters
+        if (isset($mock_data['GET'])) {
+            $_GET = array_merge($_GET, $mock_data['GET']);
+        }
+        if (isset($mock_data['POST'])) {
+            $_POST = array_merge($_POST, $mock_data['POST']);
+            // Set method to POST if POST data is injected
+            $_SERVER['REQUEST_METHOD'] = 'POST';
+        }
+        $_REQUEST = array_merge($_REQUEST, $_GET, $_POST);
     }
 }
 

@@ -28,7 +28,7 @@ class BLMDatabase:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS observations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trace_id TEXT NOT NULL,
+                    trace_id TEXT UNIQUE NOT NULL,
                     timestamp DATETIME NOT NULL,
                     source TEXT NOT NULL,
                     coverage_data TEXT,
@@ -114,7 +114,7 @@ class BLMDatabase:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute("""
-                    INSERT INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
+                    INSERT OR REPLACE INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     observation["trace_id"],
@@ -128,7 +128,7 @@ class BLMDatabase:
                 # Also update FTS index
                 content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
                 cursor.execute("""
-                    INSERT INTO observations_fts (trace_id, content_summary, source)
+                    INSERT OR REPLACE INTO observations_fts (trace_id, content_summary, source)
                     VALUES (?, ?, ?)
                 """, (observation["trace_id"], content_summary, observation["source"]))
                 
