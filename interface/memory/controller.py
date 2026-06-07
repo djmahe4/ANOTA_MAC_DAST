@@ -173,11 +173,24 @@ class MemoryController:
         observation = self._get_observation(trace_id)
         
         # 2. Fetch Semantic Memory (What is the code structure?)
-        # For each file in coverage, get structural hints
+        # For each file in coverage, get structural hints and clean code
         files = observation.get("coverage_data", {}).keys()
         structural_context = []
+        from logic_engine.agents.php_profiler import PHPProfiler
+        php_prof = PHPProfiler()
+
         for file_path in files:
             hints = self.codebase.search_graph(name_pattern=f".*{file_path}.*")
+            
+            # If it's a PHP file, provide a cleaned snippet hint
+            if file_path.endswith(".php"):
+                full_path = os.path.join(self.codebase.project_name.replace('-', '/'), file_path)
+                # Note: this path resolution is a bit hacky, in real use we'd have the root_path
+                # For eval, we'll just check if it exists in current dir
+                if os.path.exists(file_path):
+                    clean_code = php_prof.strip_noise(file_path)
+                    hints.append({"type": "code_summary", "content": clean_code[:1000]}) # Limit size
+            
             structural_context.append(hints)
             
         return {

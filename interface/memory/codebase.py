@@ -1,6 +1,7 @@
 import subprocess
 import json
 import os
+from shutil import which
 
 class CodebaseMemoryClient:
     """
@@ -9,20 +10,26 @@ class CodebaseMemoryClient:
     """
     def __init__(self, project_name="anota_target"):
         self.project_name = project_name
-        self.cli_bin = "codebase-memory-mcp" # Assumes it's in PATH
+        self.cli_bin = "codebase-memory-mcp"
+        
+        # Fallback to .venv/bin if not in global PATH
+        venv_path = os.path.join(os.getcwd(), ".venv", "bin", self.cli_bin)
+        if not self._is_in_path(self.cli_bin) and os.path.exists(venv_path):
+            self.cli_bin = venv_path
+            
         self._verify_cli()
 
+    def _is_in_path(self, name):
+        return which(name) is not None
+
     def _verify_cli(self):
-        """
-        Check if the MCP CLI binary exists in the PATH.
-        """
-        from shutil import which
-        if which(self.cli_bin) is None:
-            print(f"Warning: {self.cli_bin} not found in PATH. CLI calls will fail.")
+        if not self._is_in_path(self.cli_bin) and not os.path.exists(self.cli_bin):
+            print(f"Warning: {self.cli_bin} not found. CLI calls will fail.")
 
     def index_repository(self, repo_path, mode="full"):
         """
         Indices the repository and builds the knowledge graph.
+        Updates self.project_name with the actual name returned by the CLI.
         """
         # Security: Normalize and validate path
         abs_path = os.path.abspath(repo_path)
@@ -34,7 +41,15 @@ class CodebaseMemoryClient:
             "mode": mode,
             "persistence": True
         }
-        return self._run_command("index_repository", args)
+        result = self._run_command("index_repository", args)
+        
+        # Extract project name from result if successful
+        if isinstance(result, dict) and "project" in result:
+            self.project_name = result["project"]
+        elif isinstance(result, dict) and "name" in result:
+            self.project_name = result["name"]
+            
+        return result
 
     def search_graph(self, query=None, name_pattern=None, label=None, min_degree=None, limit=50):
         """
@@ -77,11 +92,20 @@ class CodebaseMemoryClient:
         try:
             # Added 300s timeout for large indexing tasks
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
-            return json.loads(result.stdout)
+            data = json.loads(result.stdout)
+
+            # If the response is wrapped in a 'results' field (standard for search_graph), unwrap it
+            if isinstance(data, dict) and "results" in data:
+                return data["results"]
+            return data
+
         except subprocess.TimeoutExpired:
             return {"error": f"CLI command {cmd_name} timed out after 300s"}
         except subprocess.CalledProcessError as e:
             # Return error info in the same format
             return {"error": str(e), "stderr": e.stderr}
         except json.JSONDecodeError:
-            return {"error": "Failed to decode CLI output", "raw": result.stdout}
+            # Try to handle case where stdout might be None or empty
+            raw_output = result.stdout if 'result' in locals() else "N/A"
+            return {"error": f"Failed to decode CLI output: {raw_output}"}
+
