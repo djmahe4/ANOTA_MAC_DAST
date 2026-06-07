@@ -20,7 +20,9 @@ This repository contains the full artifact for the MAC-DAST framework, extending
 
 - [`ANOTA-interpreter/`](ANOTA-interpreter/) – Hardened CPython 3.10.13 fork. Includes C-level hashtable refactors and dealloc hooks. See its [README](ANOTA-interpreter/README.md) for build steps.
 - [`ANOTA-interpreter/syscall-module/`](ANOTA-interpreter/syscall-module/) – Extended Rust workspace for eBPF tracing. Now supports dynamic uprobes and string argument extraction. Refer to its [README](ANOTA-interpreter/syscall-module/README.md).
+- [`logic_engine/`](logic_engine/) – **[NEW]** The "brain" of MAC-DAST. Contains the LangGraph orchestrator, `iii-engine` durable workers, and the multi-tier agent memory pipeline.
 - [`interface/`](interface/) – **[NEW]** MAC-DAST interface layer. Contains the Telemetry Aggregator, PHP Xdebug harness, and C++ uprobe coordinator.
+- [`agents/prompts/`](agents/prompts/) – **[NEW]** Prompt templates for the agents.
 - [`SupplementaryMaterials/`](SupplementaryMaterials/) – Original ANOTA evaluation data and user study details.
 
 ---
@@ -29,5 +31,6 @@ This repository contains the full artifact for the MAC-DAST framework, extending
 
 1. **Instrumentation Base**: Start with `ANOTA-interpreter/README.md` to build the hardened interpreter and run the security primitives.
 2. **eBPF Tracing**: Move to `ANOTA-interpreter/syscall-module/README.md` to set up the uprobe and syscall monitoring daemon.
-3. **Telemetry & Aggregation**: Explore `interface/` to see how coverage and state data are consolidated for the MAC-DAST agents.
-4. **Original Artifact**: Consult the `SupplementaryMaterials/` for baseline performance data and the annotation studies described in the original paper.
+3. **Logic Engine & Agents**: Explore `logic_engine/` to see how the multi-agent swarm processes telemetry and synthesizes logic attacks using `mistral-nemo` and `Qwen 2.5 Coder`.
+4. **Telemetry & Aggregation**: Explore `interface/` to see how coverage and state data are consolidated for the agents.
+5. **Original Artifact**: Consult the `SupplementaryMaterials/` for baseline performance data and the annotation studies described in the original paper.

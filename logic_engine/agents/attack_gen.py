@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from logic_engine.agent_config import AgentConfig
 
 class AttackGenerator:
@@ -37,8 +38,19 @@ class AttackGenerator:
         
         # 4. Invoke LLM
         response = await self.llm.ainvoke(prompt)
+        content = response.content
         
-        try:
-            return json.loads(response.content)
-        except json.JSONDecodeError:
-            return {"error": "LLM failed to return JSON", "raw": response.content}
+        # 5. Robust JSON extraction
+        # Try to find JSON within markdown blocks or raw
+        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+                
+        return {
+            "error": "LLM failed to return valid JSON",
+            "hypothesis": "FAILED_TO_PARSE",
+            "raw": content
+        }

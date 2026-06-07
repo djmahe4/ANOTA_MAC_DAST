@@ -11,6 +11,10 @@ class AgentConfig:
     REASONING_MODEL = "mistral-nemo:latest"  # 1M context, great for orchestration
     CODER_MODEL = "qwen2.5-coder:7b"        # Specialized for code and uprobe traces
     EMBED_MODEL = "bge-m3:latest"
+    
+    # Logic Parameters
+    RRF_K = 60
+    CONFIDENCE_DECAY = 0.9
 
     @classmethod
     def get_embedding(cls, text):

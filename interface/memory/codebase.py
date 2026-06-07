@@ -10,6 +10,15 @@ class CodebaseMemoryClient:
     def __init__(self, project_name="anota_target"):
         self.project_name = project_name
         self.cli_bin = "codebase-memory-mcp" # Assumes it's in PATH
+        self._verify_cli()
+
+    def _verify_cli(self):
+        """
+        Check if the MCP CLI binary exists in the PATH.
+        """
+        from shutil import which
+        if which(self.cli_bin) is None:
+            print(f"Warning: {self.cli_bin} not found in PATH. CLI calls will fail.")
 
     def index_repository(self, repo_path, mode="full"):
         """
@@ -57,8 +66,11 @@ class CodebaseMemoryClient:
         ]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            # Added 300s timeout for large indexing tasks
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
             return json.loads(result.stdout)
+        except subprocess.TimeoutExpired:
+            return {"error": f"CLI command {cmd_name} timed out after 300s"}
         except subprocess.CalledProcessError as e:
             # Return error info in the same format
             return {"error": str(e), "stderr": e.stderr}

@@ -11,16 +11,19 @@ class MemoryController:
         self.blm_db = blm_db
         self.codebase = codebase_client
 
-    def consolidate(self):
+    def consolidate(self, decay_rate=None):
         """
         Background task to promote repeated Episodic patterns into Semantic memory.
         Also applies confidence decay to stale hypotheses.
         """
+        from logic_engine.agent_config import AgentConfig
+        decay_rate = decay_rate or AgentConfig.CONFIDENCE_DECAY
+        
         # 1. Promote repeated transitions to Semantic knowledge
         self._promote_frequent_transitions()
         
         # 2. Apply exponential decay to confidence scores
-        self._apply_confidence_decay()
+        self._apply_confidence_decay(decay_rate)
 
     def _promote_frequent_transitions(self):
         """
@@ -67,10 +70,13 @@ class MemoryController:
         
         self.blm_db.conn.commit()
 
-    def hybrid_search(self, query, k=60):
+    def hybrid_search(self, query, k=None):
         """
         Performs Hybrid Search (BM25 + Vector) and unifies via Reciprocal Rank Fusion (RRF).
         """
+        from logic_engine.agent_config import AgentConfig
+        k = k or AgentConfig.RRF_K
+        
         bm25_results = self._search_bm25(query)
         vector_results = self._search_vector(query)
         

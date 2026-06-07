@@ -1,7 +1,8 @@
 import json
-from typing import Annotated, TypedDict, List
+import os
+from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
-from iii_sdk import iii, Function, Trigger, Worker
+from iii import register_worker, InitOptions
 from logic_engine.agent_config import AgentConfig
 from interface.blm.db import BLMDatabase
 from interface.memory.codebase import CodebaseMemoryClient
@@ -75,12 +76,12 @@ class AgentOrchestrator:
         Agent node: Reality-checks the exploit against the instrumentation.
         """
         # Placeholder for Phase 5
-        return {"findings": ["Exploit hypothesized: " + state.get("attack_hypothesis", {}).get("hypothesis", "unknown")]}
+        hypothesis = state.get("attack_hypothesis", {}).get("hypothesis", "unknown")
+        return {"findings": [f"Exploit hypothesized: {hypothesis}"]}
 
 # --- iii-engine Integration ---
 
-@Function
-async def process_new_trace(payload):
+async def process_new_trace(payload: dict) -> dict:
     """
     Durable iii-engine function triggered when a new trace is aggregated.
     """
@@ -92,6 +93,7 @@ async def process_new_trace(payload):
         "task": "Find logic flaws",
         "trace_id": trace_id,
         "context": {},
+        "attack_hypothesis": {},
         "findings": [],
         "next_action": ""
     }
@@ -99,8 +101,7 @@ async def process_new_trace(payload):
     result = await orchestrator.app.ainvoke(initial_state)
     return {"status": "complete", "findings": result["findings"]}
 
-@Function
-async def consolidate_memory(payload):
+async def consolidate_memory(payload: dict) -> dict:
     """
     Background worker to consolidate memory tiers.
     """
@@ -108,6 +109,27 @@ async def consolidate_memory(payload):
     orchestrator.memory.consolidate()
     return {"status": "consolidated"}
 
-# Usage: Start a worker to listen for trace events
-# worker = Worker(functions=[process_new_trace, consolidate_memory])
-# worker.run()
+def start_worker():
+    """
+    Starts the iii worker.
+    """
+    worker = register_worker(
+        os.environ.get("III_URL", "ws://127.0.0.1:49134"),
+        InitOptions(worker_name="mac-dast-orchestrator"),
+    )
+    
+    worker.register_function("orchestrator::process_trace", process_new_trace)
+    worker.register_function("orchestrator::consolidate", consolidate_memory)
+    
+    # Example trigger for process_trace (could be a queue or event)
+    # worker.register_trigger({
+    #     "type": "durable:subscriber", 
+    #     "function_id": "orchestrator::process_trace", 
+    #     "config": {"topic": "traces"}
+    # })
+
+    print("[*] MAC-DAST Orchestrator Worker started.")
+    worker.wait()
+
+if __name__ == "__main__":
+    start_worker()
