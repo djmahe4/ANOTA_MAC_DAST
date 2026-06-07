@@ -13,6 +13,24 @@ This repository contains the full artifact for the MAC-DAST framework, extending
 - **Dynamic eBPF Tracing**: Extended the `syscall-module` with dynamic `UPROBE` support, allowing agents to trace arbitrary C/C++ functions and extract string arguments (e.g., SQL queries, file paths) directly from user-space memory.
 - **Dual-Language Telemetry**: Integrated `PHP_XDEBUG` coverage and state observation alongside the native C/C++ trace harness.
 - **Unified Telemetry Stream**: A specialized `TelemetryAggregator` consolidates coverage, state transitions, and trace events into a unified JSON stream for BLM extraction agents.
+- **Autonomous Attack Generation**: Specialized agents synthesize logic exploits (step-skipping, parameter tampering, race conditions) using `Qwen 2.5 Coder`, grounded in formal Business Logic Models.
+- **High-Fidelity Validation**: A 'Critic' agent using `mistral-nemo` reality-checks hypothesized attacks against ground-truth telemetry, applying a hybrid confidence score (LLM judgment + keyword-match metrics).
+- **Automated Reproduction**: Confirmed vulnerabilities trigger the automatic generation of standalone Python reproduction scripts for rapid verification and fix-validation.
+
+## Runtime Permissions & Security
+
+MAC-DAST operates across different privilege levels. To ensure smooth execution:
+
+1.  **Trace Daemon (Root)**: The `syscall-tracepoint` process **must** run as root (via `sudo`) to manage eBPF programs and uprobes.
+2.  **Control Socket**: The daemon automatically sets the `/tmp/anota_syscall.sock` permissions to `666` (world-writable) to allow the non-root logic engine to send commands.
+3.  **Readiness Check**: Use the provided diagnostic tool to verify your environment before a full scan:
+    ```bash
+    python3 runtime_check.py
+    ```
+
+### Recommended Workflow
+- Terminal 1 (Root): `cd ANOTA-interpreter/syscall-module && sudo ./target/release/syscall-tracepoint`
+- Terminal 2 (User): `python3 logic_engine/orchestrator.py`
 
 ---
 

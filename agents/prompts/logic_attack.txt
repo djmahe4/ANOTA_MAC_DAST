@@ -8,7 +8,7 @@ Observed BLM Graph: {blm_graph_fragment}
 
 STRATEGY RULES:
 1. FOCUS on logic abuse: Step-skipping, parameter tampering, race conditions, unauthorized state transitions.
-2. DO NOT suggest classic injection (SQLi, XSS) unless it directly impacts business logic.
+2. DO NOT suggest classic injection (SQLi, XSS).
 3. GROUND your hypotheses in the provided coverage and state data.
 4. If you see a missing authorization check (e.g., direct access to a 'fulfillment' endpoint without a 'payment' state), prioritize it.
 

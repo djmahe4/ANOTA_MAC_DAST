@@ -1,121 +1,163 @@
 import sqlite3
 import json
 import os
+from threading import Lock
 
 class BLMDatabase:
     """
     Handles SQLite persistence for raw observations and the synthesized state graph.
+    Uses WAL mode and a thread-lock for concurrent access safety.
     """
+    _write_lock = Lock()
+
     def __init__(self, db_path="data/blm.db"):
         # Ensure data directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        # Allow multithreaded access for iii-engine workers
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Enable WAL mode for concurrent read/write and reliability
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self._create_schema()
 
     def _create_schema(self):
-        cursor = self.conn.cursor()
-        
-        # 1. Observations: Raw telemetry logs
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS observations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trace_id TEXT NOT NULL,
-                timestamp DATETIME NOT NULL,
-                source TEXT NOT NULL,
-                coverage_data TEXT,
-                state_data TEXT,
-                events_data TEXT,
-                confidence_score REAL DEFAULT 1.0,
-                last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            
+            # 1. Observations: Raw telemetry logs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT NOT NULL,
+                    timestamp DATETIME NOT NULL,
+                    source TEXT NOT NULL,
+                    coverage_data TEXT,
+                    state_data TEXT,
+                    events_data TEXT,
+                    confidence_score REAL DEFAULT 1.0,
+                    last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        # 2. States: Unique logical states (Nodes)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS states (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                state_hash TEXT UNIQUE NOT NULL,
-                raw_state TEXT NOT NULL
-            )
-        """)
+            # 2. States: Unique logical states (Nodes)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state_hash TEXT UNIQUE NOT NULL,
+                    raw_state TEXT NOT NULL
+                )
+            """)
 
-        # 3. Transitions: Edges in the state graph
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS transitions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_state_id INTEGER,
-                to_state_id INTEGER,
-                action_identifier TEXT NOT NULL,
-                coverage_signature TEXT NOT NULL,
-                trace_id TEXT,
-                confidence_score REAL DEFAULT 1.0,
-                last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(from_state_id) REFERENCES states(id),
-                FOREIGN KEY(to_state_id) REFERENCES states(id)
-            )
-        """)
+            # 3. Transitions: Edges in the state graph
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transitions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_state_id INTEGER,
+                    to_state_id INTEGER,
+                    action_identifier TEXT NOT NULL,
+                    coverage_signature TEXT NOT NULL,
+                    trace_id TEXT,
+                    confidence_score REAL DEFAULT 1.0,
+                    last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(from_state_id) REFERENCES states(id),
+                    FOREIGN KEY(to_state_id) REFERENCES states(id)
+                )
+            """)
 
-        # 4. Static Hints: Metadata from OpenAPI, DB schemas, etc.
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS static_hints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL, -- 'openapi', 'db_schema', 'routing'
-                key TEXT NOT NULL,
-                value TEXT NOT NULL, -- JSON content
-                UNIQUE(type, key)
-            )
-        """)
+            # 4. Static Hints: Metadata from OpenAPI, DB schemas, etc.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS static_hints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    UNIQUE(type, key)
+                )
+            """)
 
-        # 5. Full-Text Search (FTS5) for observations
-        cursor.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-                trace_id, content_summary, source
-            )
-        """)
+            # 5. Full-Text Search (FTS5) for observations
+            cursor.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+                    trace_id, content_summary, source
+                )
+            """)
 
-        # 6. Vector Embeddings
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vector_embeddings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trace_id TEXT UNIQUE NOT NULL,
-                embedding BLOB NOT NULL, -- Float32 array
-                FOREIGN KEY(trace_id) REFERENCES observations(trace_id)
-            )
-        """)
-        
-        self.conn.commit()
+            # 6. Vector Embeddings
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vector_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT UNIQUE NOT NULL,
+                    embedding BLOB NOT NULL,
+                    FOREIGN KEY(trace_id) REFERENCES observations(trace_id)
+                )
+            """)
+            
+            self.conn.commit()
 
     def save_static_hint(self, hint_type, key, value_dict):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO static_hints (type, key, value)
-            VALUES (?, ?, ?)
-        """, (hint_type, key, json.dumps(value_dict)))
-        self.conn.commit()
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO static_hints (type, key, value)
+                VALUES (?, ?, ?)
+            """, (hint_type, key, json.dumps(value_dict)))
+            self.conn.commit()
 
     def save_observation(self, observation):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            INSERT INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            observation["trace_id"],
-            observation["timestamp"],
-            observation["source"],
-            json.dumps(observation.get("coverage", {})),
-            json.dumps(observation.get("state", {})),
-            json.dumps(observation.get("events", []))
-        ))
-        
-        # Also update FTS index
-        content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
-        cursor.execute("""
-            INSERT INTO observations_fts (trace_id, content_summary, source)
-            VALUES (?, ?, ?)
-        """, (observation["trace_id"], content_summary, observation["source"]))
-        
-        self.conn.commit()
-        return cursor.lastrowid
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                observation["trace_id"],
+                observation["timestamp"],
+                observation["source"],
+                json.dumps(observation.get("coverage", {})),
+                json.dumps(observation.get("state", {})),
+                json.dumps(observation.get("events", []))
+            ))
+            
+            # Also update FTS index
+            content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
+            cursor.execute("""
+                INSERT INTO observations_fts (trace_id, content_summary, source)
+                VALUES (?, ?, ?)
+            """, (observation["trace_id"], content_summary, observation["source"]))
+            
+            self.conn.commit()
+            return cursor.lastrowid
+
+    def get_or_create_state(self, state_hash, raw_state_dict):
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT id FROM states WHERE state_hash = ?", (state_hash,))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+            
+            cursor.execute("""
+                INSERT INTO states (state_hash, raw_state)
+                VALUES (?, ?)
+            """, (state_hash, json.dumps(raw_state_dict)))
+            self.conn.commit()
+            return cursor.lastrowid
+
+    def record_transition(self, from_id, to_id, action, cov_sig, trace_id):
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT id FROM transitions 
+                WHERE from_state_id = ? AND to_state_id = ? 
+                AND action_identifier = ? AND coverage_signature = ?
+            """, (from_id, to_id, action, cov_sig))
+            
+            if not cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO transitions (from_state_id, to_state_id, action_identifier, coverage_signature, trace_id)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (from_id, to_id, action, cov_sig, trace_id))
+                self.conn.commit()
 
     def close(self):
         self.conn.close()

@@ -6,12 +6,25 @@ The `logic_engine/` directory contains the cognitive core of the MAC-DAST framew
 
 ### 1. Agent Orchestrator (`orchestrator.py`)
 A Supervisor-Worker network built on **LangGraph**. It routes logical tasks between specialized agents:
-- **Scanner Agent**: Maps the application attack surface.
-- **Attack Generator Agent**: Synthesizes multi-step logic exploits.
-- **Validator Agent**: Confirms exploits against ground-truth telemetry.
+- **`analyze_trace`**: Consolidates 4-tier memory and prepares analysis context.
+- **`generate_attack`**: Synthesizes multi-step logic exploits using the **Attack Generator**.
+- **`validate_attack`**: Executes payloads and reality-checks outcomes using the **Validator Agent**.
 
-### 2. Durable Execution (`iii-engine`)
-Integrated with the **iii-engine** Python SDK to ensure durable, long-running agent workflows.
+### 2. Offensive Tooling (`agents/mutator.py`, `agents/concurrent_attacker.py`)
+Provides the "hands" for the Attack Generator:
+- **`RequestMutator`**: Implements parameter tampering (value replacement/omission) and sequence reordering (step-skipping).
+- **`ConcurrentAttacker`**: Async thread spawner designed to trigger and verify race conditions.
+- **`AttackExecutor`**: A routing layer that executes synthesized payloads on the physical PHP/C++ harnesses.
+
+### 3. Validation & Reproduction (`agents/validator.py`, `agents/repro_gen.py`)
+Eliminates false positives and provides actionable evidence:
+- **Validator Agent**: A 'Critic' using `mistral-nemo` to judge ground-truth telemetry. It computes a hybrid confidence score:
+    - **60% LLM Subjective Judgment**: Deep semantic analysis of the trace.
+    - **40% Objective Keyword Match**: Correlation between hypothesized outcomes and telemetry keywords.
+- **Reproduction Generator**: Synthesizes standalone Python/Bash scripts for every confirmed vulnerability, ensuring developers can instantly reproduce findings.
+
+### 4. Durable Execution (`iii-engine`)
+...Integrated with the **iii-engine** Python SDK to ensure durable, long-running agent workflows.
 - `process_trace`: A durable function triggered whenever new telemetry is aggregated.
 - `consolidate`: A background worker that manages memory tier promotion and decay.
 

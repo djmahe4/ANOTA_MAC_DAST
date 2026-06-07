@@ -24,8 +24,13 @@ class CodebaseMemoryClient:
         """
         Indices the repository and builds the knowledge graph.
         """
+        # Security: Normalize and validate path
+        abs_path = os.path.abspath(repo_path)
+        if not os.path.exists(abs_path):
+            return {"error": f"Path does not exist: {abs_path}"}
+            
         args = {
-            "repo_path": os.path.abspath(repo_path),
+            "repo_path": abs_path,
             "mode": mode,
             "persistence": True
         }
@@ -60,6 +65,10 @@ class CodebaseMemoryClient:
         """
         Executes the MCP CLI command and returns the parsed JSON result.
         """
+        # Security: Whitelist command names
+        if cmd_name not in ["index_repository", "search_graph"]:
+            return {"error": f"Unauthorized command: {cmd_name}"}
+
         cmd = [
             self.cli_bin, "cli", cmd_name,
             json.dumps(args_dict)

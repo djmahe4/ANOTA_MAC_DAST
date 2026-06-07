@@ -15,24 +15,10 @@ class BLMGenerator:
 
     def _get_or_create_state(self, state_dict):
         """
-        Hashes the state and returns its ID in the 'states' table.
+        Hashes the state and uses the database to find/create it thread-safely.
         """
         state_hash = self.mapper.compute_hash(state_dict)
-        cursor = self.db.conn.cursor()
-        
-        # Check if state exists
-        cursor.execute("SELECT id FROM states WHERE state_hash = ?", (state_hash,))
-        row = cursor.fetchone()
-        if row:
-            return row[0]
-        
-        # Create new state
-        cursor.execute("""
-            INSERT INTO states (state_hash, raw_state)
-            VALUES (?, ?)
-        """, (state_hash, json.dumps(state_dict)))
-        self.db.conn.commit()
-        return cursor.lastrowid
+        return self.db.get_or_create_state(state_hash, state_dict)
 
     def _compute_coverage_signature(self, coverage):
         """
@@ -61,39 +47,37 @@ class BLMGenerator:
     def ingest(self, telemetry_item, action_name="unknown"):
         """
         Processes a single telemetry item, recording the observation and updating transitions.
+        Uses database methods that are thread-safe.
         """
-        # 1. Save raw observation
-        self.db.save_observation(telemetry_item)
-        
-        # 1b. Vector Indexing (if memory controller is available)
-        if self.memory:
-            content_to_index = f"{json.dumps(telemetry_item.get('state', {}))} {json.dumps(telemetry_item.get('events', []))}"
-            self.memory.add_vector_index(telemetry_item["trace_id"], content_to_index)
-        
-        # 2. Get current state ID
-        current_state_dict = telemetry_item.get("state", {})
-        current_state_id = self._get_or_create_state(current_state_dict)
-        
-        # 3. Record transition if we have a previous state
-        if self.last_state_id is not None:
-            coverage = telemetry_item.get("coverage", {})
-            cov_sig = self._compute_coverage_signature(coverage)
+        try:
+            # 1. Save raw observation
+            self.db.save_observation(telemetry_item)
             
-            cursor = self.db.conn.cursor()
-            # Check if this transition (action + path) already exists
-            cursor.execute("""
-                SELECT id FROM transitions 
-                WHERE from_state_id = ? AND to_state_id = ? 
-                AND action_identifier = ? AND coverage_signature = ?
-            """, (self.last_state_id, current_state_id, action_name, cov_sig))
+            # 1b. Vector Indexing (if memory controller is available)
+            if self.memory:
+                content_to_index = f"{json.dumps(telemetry_item.get('state', {}))} {json.dumps(telemetry_item.get('events', []))}"
+                self.memory.add_vector_index(telemetry_item["trace_id"], content_to_index)
             
-            if not cursor.fetchone():
-                cursor.execute("""
-                    INSERT INTO transitions (from_state_id, to_state_id, action_identifier, coverage_signature, trace_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (self.last_state_id, current_state_id, action_name, cov_sig, telemetry_item["trace_id"]))
-                self.db.conn.commit()
-        
-        # Update tracker
-        self.last_state_id = current_state_id
-        return current_state_id
+            # 2. Get current state ID
+            current_state_dict = telemetry_item.get("state", {})
+            current_state_id = self._get_or_create_state(current_state_dict)
+            
+            # 3. Record transition if we have a previous state
+            if self.last_state_id is not None:
+                coverage = telemetry_item.get("coverage", {})
+                cov_sig = self._compute_coverage_signature(coverage)
+                
+                self.db.record_transition(
+                    self.last_state_id, 
+                    current_state_id, 
+                    action_name, 
+                    cov_sig, 
+                    telemetry_item["trace_id"]
+                )
+            
+            # Update tracker
+            self.last_state_id = current_state_id
+            return current_state_id
+        except Exception as e:
+            print(f"Error during ingestion: {e}")
+            return None
