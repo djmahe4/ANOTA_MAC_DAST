@@ -24,7 +24,9 @@ class BLMDatabase:
                 source TEXT NOT NULL,
                 coverage_data TEXT,
                 state_data TEXT,
-                events_data TEXT
+                events_data TEXT,
+                confidence_score REAL DEFAULT 1.0,
+                last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -46,6 +48,8 @@ class BLMDatabase:
                 action_identifier TEXT NOT NULL,
                 coverage_signature TEXT NOT NULL,
                 trace_id TEXT,
+                confidence_score REAL DEFAULT 1.0,
+                last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(from_state_id) REFERENCES states(id),
                 FOREIGN KEY(to_state_id) REFERENCES states(id)
             )
@@ -59,6 +63,23 @@ class BLMDatabase:
                 key TEXT NOT NULL,
                 value TEXT NOT NULL, -- JSON content
                 UNIQUE(type, key)
+            )
+        """)
+
+        # 5. Full-Text Search (FTS5) for observations
+        cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+                trace_id, content_summary, source
+            )
+        """)
+
+        # 6. Vector Embeddings
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vector_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT UNIQUE NOT NULL,
+                embedding BLOB NOT NULL, -- Float32 array
+                FOREIGN KEY(trace_id) REFERENCES observations(trace_id)
             )
         """)
         
@@ -85,6 +106,14 @@ class BLMDatabase:
             json.dumps(observation.get("state", {})),
             json.dumps(observation.get("events", []))
         ))
+        
+        # Also update FTS index
+        content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
+        cursor.execute("""
+            INSERT INTO observations_fts (trace_id, content_summary, source)
+            VALUES (?, ?, ?)
+        """, (observation["trace_id"], content_summary, observation["source"]))
+        
         self.conn.commit()
         return cursor.lastrowid
 

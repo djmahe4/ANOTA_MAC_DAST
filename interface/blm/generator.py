@@ -7,9 +7,10 @@ class BLMGenerator:
     """
     Parses telemetry and constructs/updates the Business Logic Model (State Graph).
     """
-    def __init__(self, db_path="data/blm.db"):
+    def __init__(self, db_path="data/blm.db", memory_controller=None):
         self.db = BLMDatabase(db_path)
         self.mapper = StateMapper()
+        self.memory = memory_controller
         self.last_state_id = None
 
     def _get_or_create_state(self, state_dict):
@@ -63,6 +64,11 @@ class BLMGenerator:
         """
         # 1. Save raw observation
         self.db.save_observation(telemetry_item)
+        
+        # 1b. Vector Indexing (if memory controller is available)
+        if self.memory:
+            content_to_index = f"{json.dumps(telemetry_item.get('state', {}))} {json.dumps(telemetry_item.get('events', []))}"
+            self.memory.add_vector_index(telemetry_item["trace_id"], content_to_index)
         
         # 2. Get current state ID
         current_state_dict = telemetry_item.get("state", {})
