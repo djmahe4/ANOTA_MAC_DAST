@@ -129,3 +129,5 @@ baks/anota-interpreter/python
 # Backup syscall-module Rust artifacts
 baks/syscall-module/target/
 baks/syscall-module/**/target/
+
+Data/

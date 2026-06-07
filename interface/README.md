@@ -22,6 +22,13 @@ Coordinates with the `syscall-module` to trace native binary execution.
 - `harness.py`: Manages binary execution and dynamically attaches eBPF uprobes to specific symbols.
 - **Argument Extraction**: Automatically retrieves string-based function arguments (SQL queries, file paths) from the eBPF kernel stream.
 
+### 4. BLM Extraction (`blm/`)
+Transforms raw telemetry into a persistent Business Logic Model (State Graph).
+- `generator.py`: The core engine that ingests telemetry and updates the state graph in SQLite.
+- `state_mapper.py`: Handles state normalization and hashing to identify unique logical nodes (e.g., distinguishing "Guest" vs "Admin" while ignoring transient session IDs).
+- `db.py`: Manages the SQLite schema for observations, states, and transitions.
+- `exporter.py`: Generates Mermaid.js diagrams from the state graph for visualization.
+
 ## Telemetry Schema
 
 All telemetry is aggregated into a unified format:
