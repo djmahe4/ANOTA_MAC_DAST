@@ -1,3 +1,6 @@
+import json
+import os
+
 class MemoryController:
     """
     Manages the 4-tier memory consolidation pipeline for MAC-DAST agents.
@@ -184,11 +187,12 @@ class MemoryController:
             
             # If it's a PHP file, provide a cleaned snippet hint
             if file_path.endswith(".php"):
-                full_path = os.path.join(self.codebase.project_name.replace('-', '/'), file_path)
-                # Note: this path resolution is a bit hacky, in real use we'd have the root_path
-                # For eval, we'll just check if it exists in current dir
-                if os.path.exists(file_path):
-                    clean_code = php_prof.strip_noise(file_path)
+                # Use explicit root_path if available
+                root = getattr(self.codebase, 'root_path', os.getcwd())
+                full_path = os.path.abspath(os.path.join(root, file_path))
+                
+                if os.path.exists(full_path) and full_path.startswith(os.path.abspath(root)):
+                    clean_code = php_prof.strip_noise(full_path)
                     hints.append({"type": "code_summary", "content": clean_code[:1000]}) # Limit size
             
             structural_context.append(hints)

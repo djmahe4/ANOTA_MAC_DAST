@@ -14,8 +14,9 @@ class ReproGenerator:
 
     async def generate(self, hypothesis, trace, verdict):
         """
-        Synthesizes the reproduction script.
+        Synthesizes the reproduction script and extracts raw code.
         """
+        import re
         prompt = self.prompt_template.format(
             hypothesis=json.dumps(hypothesis, indent=2),
             trace=json.dumps(trace, indent=2),
@@ -23,4 +24,12 @@ class ReproGenerator:
         )
         
         response = await self.llm.ainvoke(prompt)
-        return response.content
+        content = response.content
+        
+        # Robust code extraction (Python blocks)
+        code_match = re.search(r'```python\n(.*?)```', content, re.DOTALL)
+        if code_match:
+            return code_match.group(1).strip()
+            
+        # Fallback: take whole content if no blocks found
+        return content.strip()

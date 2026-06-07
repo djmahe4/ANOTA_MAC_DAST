@@ -96,68 +96,89 @@ class BLMDatabase:
 
     def save_static_hint(self, hint_type, key, value_dict):
         with self._write_lock:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO static_hints (type, key, value)
-                VALUES (?, ?, ?)
-            """, (hint_type, key, json.dumps(value_dict)))
-            self.conn.commit()
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO static_hints (type, key, value)
+                    VALUES (?, ?, ?)
+                """, (hint_type, key, json.dumps(value_dict)))
+                self.conn.commit()
+            except Exception as e:
+                self.conn.rollback()
+                raise e
 
     def save_observation(self, observation):
         with self._write_lock:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                observation["trace_id"],
-                observation["timestamp"],
-                observation["source"],
-                json.dumps(observation.get("coverage", {})),
-                json.dumps(observation.get("state", {})),
-                json.dumps(observation.get("events", []))
-            ))
-            
-            # Also update FTS index
-            content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
-            cursor.execute("""
-                INSERT INTO observations_fts (trace_id, content_summary, source)
-                VALUES (?, ?, ?)
-            """, (observation["trace_id"], content_summary, observation["source"]))
-            
-            self.conn.commit()
-            return cursor.lastrowid
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    INSERT INTO observations (trace_id, timestamp, source, coverage_data, state_data, events_data)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    observation["trace_id"],
+                    observation["timestamp"],
+                    observation["source"],
+                    json.dumps(observation.get("coverage", {})),
+                    json.dumps(observation.get("state", {})),
+                    json.dumps(observation.get("events", []))
+                ))
+                
+                # Also update FTS index
+                content_summary = f"{json.dumps(observation.get('state', {}))} {json.dumps(observation.get('events', []))}"
+                cursor.execute("""
+                    INSERT INTO observations_fts (trace_id, content_summary, source)
+                    VALUES (?, ?, ?)
+                """, (observation["trace_id"], content_summary, observation["source"]))
+                
+                self.conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                self.conn.rollback()
+                raise e
 
     def get_or_create_state(self, state_hash, raw_state_dict):
         with self._write_lock:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT id FROM states WHERE state_hash = ?", (state_hash,))
-            row = cursor.fetchone()
-            if row:
-                return row[0]
-            
-            cursor.execute("""
-                INSERT INTO states (state_hash, raw_state)
-                VALUES (?, ?)
-            """, (state_hash, json.dumps(raw_state_dict)))
-            self.conn.commit()
-            return cursor.lastrowid
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id FROM states WHERE state_hash = ?", (state_hash,))
+                row = cursor.fetchone()
+                if row:
+                    self.conn.commit()
+                    return row[0]
+                
+                cursor.execute("""
+                    INSERT INTO states (state_hash, raw_state)
+                    VALUES (?, ?)
+                """, (state_hash, json.dumps(raw_state_dict)))
+                self.conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                self.conn.rollback()
+                raise e
 
     def record_transition(self, from_id, to_id, action, cov_sig, trace_id):
         with self._write_lock:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                SELECT id FROM transitions 
-                WHERE from_state_id = ? AND to_state_id = ? 
-                AND action_identifier = ? AND coverage_signature = ?
-            """, (from_id, to_id, action, cov_sig))
-            
-            if not cursor.fetchone():
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self.conn.cursor()
                 cursor.execute("""
-                    INSERT INTO transitions (from_state_id, to_state_id, action_identifier, coverage_signature, trace_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (from_id, to_id, action, cov_sig, trace_id))
+                    SELECT id FROM transitions 
+                    WHERE from_state_id = ? AND to_state_id = ? 
+                    AND action_identifier = ? AND coverage_signature = ?
+                """, (from_id, to_id, action, cov_sig))
+                
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        INSERT INTO transitions (from_state_id, to_state_id, action_identifier, coverage_signature, trace_id)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (from_id, to_id, action, cov_sig, trace_id))
                 self.conn.commit()
+            except Exception as e:
+                self.conn.rollback()
+                raise e
 
     def close(self):
         self.conn.close()

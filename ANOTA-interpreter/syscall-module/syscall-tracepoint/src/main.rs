@@ -148,12 +148,12 @@ async fn run_control_server(path: PathBuf, sender: mpsc::Sender<MonitorCommand>)
     }
     let listener = UnixListener::bind(&path)?;
     
-    // Security: Allow non-root users to connect to the control socket.
+    // Security: Allow group members to connect to the control socket.
     // This is required for the MAC-DAST harnesses to trigger START/STOP/UPROBE.
     use std::os::unix::fs::PermissionsExt;
     if let Ok(metadata) = std::fs::metadata(&path) {
         let mut perms = metadata.permissions();
-        perms.set_mode(0o666);
+        perms.set_mode(0o660); // Restricted to owner and group
         let _ = std::fs::set_permissions(&path, perms);
     }
     loop {

@@ -10,48 +10,51 @@ class PHPProfiler:
         """
         Uses ripgrep to find signature footprints of PHP entry points.
         """
+        root_dir = os.path.abspath(root_dir)
         entry_points = set()
         
         # 1. Search for Composer Autoloader
         try:
             result = subprocess.run(
                 ["rg", "-l", "vendor/autoload.php", root_dir],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.stdout:
                 entry_points.update([os.path.abspath(p) for p in result.stdout.splitlines()])
-        except FileNotFoundError:
-            pass # rg not installed
+        except Exception:
+            pass 
             
         # 2. Search for Framework Kernels
         try:
             result = subprocess.run(
                 ["rg", "-l", r"Illuminate\\Http\\Kernel|AppKernel", root_dir],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.stdout:
                 entry_points.update([os.path.abspath(p) for p in result.stdout.splitlines()])
-        except FileNotFoundError:
+        except Exception:
             pass
 
         # 3. Search for Global Security Constants (define)
         try:
             result = subprocess.run(
                 ["rg", "-l", r"define\(", "--max-depth", "2", root_dir],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.stdout:
-                # Basic heuristic: if it defines something, it's likely an entry point
                 entry_points.update([os.path.abspath(p) for p in result.stdout.splitlines()])
-        except FileNotFoundError:
+        except Exception:
             pass
             
-        return list(entry_points)
+        # Security: Jail check - ensure all entries are within root_dir
+        safe_entries = [p for p in entry_points if p.startswith(root_dir)]
+        return safe_entries
 
     def profile_architecture(self, file_path):
         """
         Uses head to fingerprint the PHP application architecture.
         """
+        file_path = os.path.abspath(file_path)
         try:
             with open(file_path, "r") as f:
                 head = "".join([f.readline() for _ in range(20)])
@@ -71,15 +74,16 @@ class PHPProfiler:
         """
         Uses php -w to strip comments and whitespaces.
         """
+        file_path = os.path.abspath(file_path)
         try:
+            # Note: subprocess.run with a list is safe from shell injection
             result = subprocess.run(
                 ["php", "-w", file_path],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, check=True, timeout=5
             )
             return result.stdout
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             # Fallback: simple regex based stripping if php is not available
             with open(file_path, "r") as f:
                 content = f.read()
-            # This is a very basic fallback
             return re.sub(r'//.*|/\*.*?\*/', '', content, flags=re.DOTALL)

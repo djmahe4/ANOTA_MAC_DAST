@@ -16,7 +16,7 @@ class AttackExecutor:
         
         if source == "php":
             if self.php_runner:
-                return self.php_runner.run(target) # In a real implementation, we'd pass mutations
+                return self.php_runner.run(target, params=mutations) 
         elif source == "cpp":
             if self.cpp_harness:
                 # C++ attacks might involve uprobes and binary execution

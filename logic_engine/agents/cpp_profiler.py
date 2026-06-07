@@ -1,6 +1,7 @@
 import subprocess
 import os
 import re
+import shlex
 
 class CPPProfiler:
     """
@@ -11,6 +12,7 @@ class CPPProfiler:
         """
         Searches for compiled binaries with valid machine-code entry points.
         """
+        root_dir = os.path.abspath(root_dir)
         entry_points = []
         for root, _, files in os.walk(root_dir):
             # Skip hidden directories like .git
@@ -25,8 +27,11 @@ class CPPProfiler:
                     continue
                 
                 try:
+                    # Security: Jail check
+                    if not full_path.startswith(root_dir):
+                        continue
+
                     # 2. Use 'file' utility to safely check if it is a compiled binary (ELF/PE)
-                    # We check only the first few bytes via the 'file' command logic.
                     file_info = subprocess.run(["file", "-b", full_path], capture_output=True, text=True, timeout=2)
                     stdout = file_info.stdout
                     
@@ -34,7 +39,6 @@ class CPPProfiler:
                         continue # Not a compiled binary
                     
                     # 3. Use 'readelf -h' to find the actual entry point address in the header.
-                    # This is mandatory for execution and remains even if symbols are stripped.
                     header_info = subprocess.run(["readelf", "-h", full_path], capture_output=True, text=True, timeout=2)
                     
                     if any("Entry point address:" in line for line in header_info.stdout.splitlines()):
@@ -53,6 +57,7 @@ class CPPProfiler:
         Uses 'strings' to look for indicators in the data sections.
         """
         try:
+            binary_path = os.path.abspath(binary_path)
             # Check if file exists first
             if not os.path.exists(binary_path):
                 return False

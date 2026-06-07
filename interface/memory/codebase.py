@@ -44,10 +44,10 @@ class CodebaseMemoryClient:
         result = self._run_command("index_repository", args)
         
         # Extract project name from result if successful
-        if isinstance(result, dict) and "project" in result:
-            self.project_name = result["project"]
-        elif isinstance(result, dict) and "name" in result:
-            self.project_name = result["name"]
+        if isinstance(result, dict) and ("project" in result or "name" in result):
+            self.project_name = result.get("project") or result.get("name")
+            # Store root path for reliable resolution
+            self.root_path = abs_path
             
         return result
 

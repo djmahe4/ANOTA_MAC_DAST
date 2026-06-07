@@ -3,6 +3,7 @@ import os
 import json
 import re
 import tempfile
+import shlex
 from .coverage_parser import PHPXdebugParser
 
 class PHPRunner:
@@ -12,14 +13,19 @@ class PHPRunner:
     def __init__(self, php_bin="php"):
         self.php_bin = php_bin
         self.parser = PHPXdebugParser()
-        self.instrument_script = os.path.join(
+        self.instrument_script = os.path.abspath(os.path.join(
             os.path.dirname(__file__), "instrument.php"
-        )
+        ))
 
-    def run(self, script_path, args=None, env=None):
+    def run(self, script_path, args=None, env=None, params=None):
         """
         Runs a PHP script and returns the parsed telemetry.
+        Supports passing parameters via env vars that instrument.php can pick up.
         """
+        script_path = os.path.abspath(script_path)
+        if not os.path.exists(script_path):
+            return {"error": f"Script not found: {script_path}"}
+
         if args is None:
             args = []
         
@@ -33,6 +39,10 @@ class PHPRunner:
             run_env.update(env)
         
         run_env["ANOTA_TELEMETRY_TARGET"] = temp_path
+        
+        # If params provided, pass them via JSON env var
+        if params:
+            run_env["ANOTA_REQUEST_PARAMS"] = json.dumps(params)
 
         # Command to run PHP with auto-prepend
         cmd = [
@@ -43,11 +53,13 @@ class PHPRunner:
         ] + args
 
         try:
+            # Security: subprocess.run with list is safe
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                env=run_env
+                env=run_env,
+                timeout=30 # Add timeout for production safety
             )
             
             # Try reading from file first
@@ -59,9 +71,13 @@ class PHPRunner:
                     except json.JSONDecodeError:
                         pass # Fallback to stdout parsing
             
-            # Fallback to stdout parsing (e.g. if file_put_contents failed)
+            # Fallback to stdout parsing
             return self._extract_telemetry_from_stdout(result.stdout)
             
+        except subprocess.TimeoutExpired:
+            return {"error": "Execution timed out after 300s"}
+        except Exception as e:
+            return {"error": f"Execution failed: {str(e)}"}
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
@@ -70,10 +86,7 @@ class PHPRunner:
         """
         Processes the raw dictionary from PHP into the final telemetry format.
         """
-        # Parse coverage part using existing parser
         coverage_data = self.parser.parse_raw_data(raw_telemetry.get("coverage", {}))
-        
-        # Enrich with state
         coverage_data["state"] = raw_telemetry.get("state", {})
         return coverage_data
 

@@ -11,6 +11,20 @@ if (!function_exists('xdebug_start_code_coverage')) {
     return;
 }
 
+/**
+ * MAC-DAST: Mock request data if provided via environment
+ */
+$mock_params_json = getenv('ANOTA_REQUEST_PARAMS');
+if ($mock_params_json) {
+    $mock_params = json_decode($mock_params_json, true);
+    if ($mock_params) {
+        // Merge into globals
+        $_GET = array_merge($_GET, $mock_params);
+        $_POST = array_merge($_POST, $mock_params);
+        $_REQUEST = array_merge($_REQUEST, $mock_params);
+    }
+}
+
 xdebug_start_code_coverage(XDEBUG_CC_UNUSED | XDEBUG_CC_DEAD_CODE);
 
 register_shutdown_function(function() {
