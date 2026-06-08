@@ -31,7 +31,10 @@ def sync_codebase_hints(repo_path, db_path="data/blm.db", project_name="anota_ta
         
         # Discover internal dependencies for this entry point
         deps = php_prof.get_dependencies(entry)
-        for dep in deps:
+        # Add heuristic logic source files (e.g. source/low.php)
+        deps.extend(php_prof.get_logic_source_files(entry))
+        
+        for dep in set(deps):
             if dep.startswith(os.path.abspath(repo_path)):
                 rel_dep = os.path.relpath(dep, repo_path)
                 if rel_dep != rel_entry:

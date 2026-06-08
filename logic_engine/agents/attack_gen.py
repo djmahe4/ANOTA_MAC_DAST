@@ -26,17 +26,24 @@ class AttackGenerator:
         # 2. Extract state summary for prompt
         episodic = context["episodic"]
         source = episodic.get("source", "unknown")
-        state_summary = json.dumps(episodic.get("state_data", {}))
+        state_summary = json.dumps(episodic.get("state", {}))
         semantic_context = json.dumps(context["semantic"])
-        entry_point = episodic.get("state_data", {}).get("server", {}).get("PHP_SELF", "unknown")
+        entry_point = episodic.get("state", {}).get("server", {}).get("PHP_SELF", "unknown")
         
         # 3. Construct Prompt
+        # Added 'observations' context to help agent see previous failures/redirects
         base_prompt = self.template.format(
             source=source,
             entry_point=entry_point,
             state_summary=state_summary,
             semantic_context=semantic_context
         )
+        
+        # 4. Strategy: Check if we are being redirected
+        headers = episodic.get("state_data", {}).get("headers_out", [])
+        if any("Location:" in h for h in headers):
+            # We are being redirected! Add this as a hint to the agent.
+            base_prompt += "\n[CRITICAL HINT]: The previous request resulted in a REDIRECT. You likely need to satisfy an AUTHENTICATION gate first."
         
         # 4. Retry loop for LLM JSON robustness
         for attempt in range(3):

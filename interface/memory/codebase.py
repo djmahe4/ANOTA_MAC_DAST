@@ -8,8 +8,9 @@ class CodebaseMemoryClient:
     Python wrapper for codebase-memory-mcp CLI.
     Enables indexing and semantic search of the target repository.
     """
-    def __init__(self, project_name="anota_target"):
+    def __init__(self, project_name="anota_target", root_path=None):
         self.project_name = project_name
+        self.root_path = os.path.abspath(root_path) if root_path else None
         self.cli_bin = "codebase-memory-mcp"
         
         # Fallback to .venv/bin if not in global PATH

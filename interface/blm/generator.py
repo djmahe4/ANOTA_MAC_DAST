@@ -44,22 +44,32 @@ class BLMGenerator:
         key = f"{method.upper()} {path}"
         self.db.save_static_hint("openapi", key, details)
 
-    def ingest(self, telemetry_item, action_name="unknown"):
+    async def ingest(self, telemetry_item, action_name=None):
         """
-        Processes a single telemetry item, recording the observation and updating transitions.
-        Uses database methods that are thread-safe.
+        Processes a telemetry item and updates the state graph.
+        Returns the ID of the current state.
         """
         try:
+            # Ensure mandatory metadata is present
+            from datetime import datetime
+            if "timestamp" not in telemetry_item or not telemetry_item["timestamp"]:
+                telemetry_item["timestamp"] = datetime.now().isoformat()
+            if "source" not in telemetry_item:
+                telemetry_item["source"] = "unknown"
+
             # 1. Save raw observation
             self.db.save_observation(telemetry_item)
-            
-            # 1b. Vector Indexing (if memory controller is available)
-            if self.memory:
-                content_to_index = f"{json.dumps(telemetry_item.get('state', {}))} {json.dumps(telemetry_item.get('events', []))}"
-                self.memory.add_vector_index(telemetry_item["trace_id"], content_to_index)
-            
-            # 2. Get current state ID
+
+            # 2. Update Vector Index (Agentic & Async)
+            content_to_index = f"{json.dumps(telemetry_item.get('state', {}))} {json.dumps(telemetry_item.get('events', []))}"
+            try:
+                await self.memory.add_vector_index_agentic(telemetry_item["trace_id"], content_to_index)
+            except Exception as e:
+                print(f" [!] Failed to trigger agentic indexing: {e}")
+
+            # 3. Get current state ID
             current_state_dict = telemetry_item.get("state", {})
+
             current_state_id = self._get_or_create_state(current_state_dict)
             
             # 3. Record transition if we have a previous state

@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from datetime import datetime
 from interface.blm.db import BLMDatabase
 from interface.blm.generator import BLMGenerator
 from interface.php_xdebug.runner import PHPRunner
@@ -18,8 +19,8 @@ class FullScanner:
     def __init__(self, db_path, project_name, repo_path):
         self.db_path = db_path
         self.repo_path = os.path.abspath(repo_path)
-        self.codebase = CodebaseMemoryClient(project_name=project_name)
-        self.codebase.root_path = self.repo_path
+        # Fix: correctly initialize with root_path
+        self.codebase = CodebaseMemoryClient(project_name=project_name, root_path=self.repo_path)
         
         self.db = BLMDatabase(db_path)
         self.memory = MemoryController(self.db, self.codebase)
@@ -29,11 +30,14 @@ class FullScanner:
         self.php_runner = PHPRunner()
         self.cpp_harness = CPPHarness()
         
-        self.orchestrator = AgentOrchestrator(db_path=db_path)
+        self.orchestrator = AgentOrchestrator(db_path=db_path, project_name=project_name)
+        # Ensure consistency
+        self.orchestrator.memory.codebase.root_path = self.repo_path
         self.orchestrator.executor.php_runner = self.php_runner
         self.orchestrator.executor.cpp_harness = self.cpp_harness
         
-        self.semaphore = asyncio.Semaphore(4)
+        # Concurrency: Limit to 2 for local LLM stability
+        self.semaphore = asyncio.Semaphore(2)
 
     def get_entry_points(self):
         cursor = self.db.conn.cursor()
@@ -51,61 +55,51 @@ class FullScanner:
             full_path = self._validate_path(os.path.join(self.repo_path, rel_path))
             print(f"\n[>] Scanning {info['type'].upper()} entry point: {rel_path}")
             
-            # 1. Gather autonomous discovery context
-            base_trace_id = f"discovery-{info['type']}-{os.path.basename(rel_path)}-init"
+            # 1. Baseline run (Clean state)
+            base_trace_id = f"baseline-{info['type']}-{os.path.basename(rel_path)}-{int(asyncio.get_event_loop().time())}"
             try:
-                # Baseline run to feed the Discovery Agent
-                init_telemetry = {
-                    "trace_id": base_trace_id, "source": info['type'], "timestamp": "", 
-                    "coverage": {rel_path: [1]}, "state": {}, "events": []
+                if info['type'] == 'php':
+                    telemetry, _ = self.php_runner.run(full_path, repo_root=self.repo_path, use_http=True)
+                else:
+                    telemetry = self._generate_cpp_telemetry(rel_path)
+                
+                telemetry.update({
+                    "trace_id": base_trace_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": info['type']
+                })
+                await self.generator.ingest(telemetry, action_name=rel_path)
+                
+                # Logic: If coverage is high, we might not need immediate discovery
+                # Logic: We no longer do the manual setup loop here. The Orchestrator's discovery node handles it autonomously!
+                total_cov = sum(len(lines) for lines in telemetry.get("coverage", {}).values())
+                
+                # We can just start the orchestrator directly, the discovery node will handle everything.
+                trace_id = base_trace_id
+                
+                state = {
+                    "task": f"Analyze entry point {rel_path} for logic flaws.",
+                    "trace_id": trace_id, 
+                    "target_script": full_path,
+                    "context": {
+                        "active_env": {},
+                        "session": {}
+                    },
+                    "attack_hypothesis": {},
+                    "execution_result": {}, "verdict": {}, "repro_script": "",
+                    "findings": [], "next_action": ""
                 }
-                self.generator.ingest(init_telemetry, action_name=rel_path)
+
+                final_state = await self.orchestrator.app.ainvoke(state)
+
+                if final_state.get("findings"):
+                    return {
+                        "entry": rel_path,
+                        "findings": final_state["findings"],
+                        "verdict": final_state.get("verdict", {}).get("verdict", "Inconclusive")
+                    }
                 
-                # Ask Agent for suggested contexts based on code logic
-                suggested_contexts = await self.discovery_agent.get_contexts(base_trace_id)
-                print(f" [*] Discovery Agent suggested {len(suggested_contexts)} contexts")
-                
-                contexts = [{}] + suggested_contexts
-                best_results = None
-                
-                for ctx in contexts:
-                    try:
-                        from datetime import datetime
-                        trace_id = f"scan-{info['type']}-{os.path.basename(rel_path)}-{int(asyncio.get_event_loop().time())}"
-                        
-                        if info['type'] == 'php':
-                            telemetry = self.php_runner.run(full_path, env=ctx)
-                        else:
-                            telemetry = self._generate_cpp_telemetry(rel_path)
-                        
-                        telemetry.update({
-                            "trace_id": trace_id,
-                            "timestamp": datetime.now().isoformat(),
-                            "source": info['type']
-                        })
-                        
-                        self.generator.ingest(telemetry, action_name=rel_path)
-                        
-                        state = {
-                            "task": f"Analyze entry point {rel_path} with context {ctx}.",
-                            "trace_id": trace_id, "context": {}, "attack_hypothesis": {},
-                            "execution_result": {}, "verdict": {}, "repro_script": "",
-                            "findings": [], "next_action": ""
-                        }
-                        
-                        final_state = await self.orchestrator.app.ainvoke(state)
-                        
-                        if final_state.get("findings"):
-                            best_results = {
-                                "entry": rel_path,
-                                "findings": final_state["findings"],
-                                "verdict": final_state.get("verdict", {}).get("verdict", "Inconclusive")
-                            }
-                            break
-                    except Exception as e:
-                        print(f" [!] Error scanning {rel_path} with {ctx}: {e}")
-                
-                return best_results or {"entry": rel_path, "findings": [], "verdict": "Clean"}
+                return {"entry": rel_path, "findings": [], "verdict": "Clean"}
             except Exception as e:
                 print(f" [!] Discovery failure for {rel_path}: {e}")
                 return {"entry": rel_path, "findings": [], "verdict": "Discovery Error"}
@@ -122,7 +116,7 @@ class FullScanner:
 
     async def scan_all(self):
         entries = self.get_entry_points()
-        print(f"[*] Found {len(entries)} entry points. Starting parallel scan...")
+        print(f"[*] Found {len(entries)} entry points. Starting optimized scan...")
         tasks = [self._scan_entry(rel_path, info) for rel_path, info in entries]
         return await asyncio.gather(*tasks)
 
@@ -134,7 +128,11 @@ async def main():
         print("Usage: python3 -m logic_engine.scanner <db_path> <project_name> <repo_path>")
         return
     scanner = FullScanner(sys.argv[1], sys.argv[2], sys.argv[3])
-    results = await scanner.scan_all()
+    try:
+        results = await scanner.scan_all()
+    finally:
+        scanner.php_runner.stop_server()
+    
     print("\n" + "="*30 + "\n      SCAN SUMMARY\n" + "="*30)
     for res in results:
         status = "✅ CLEAN" if not res["findings"] else f"❌ VULNERABLE ({res['verdict']})"

@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, END
 from iii import register_worker, InitOptions
 from logic_engine.agent_config import AgentConfig
 from interface.blm.db import BLMDatabase
+from interface.blm.generator import BLMGenerator
 from interface.memory.codebase import CodebaseMemoryClient
 
 from interface.memory.controller import MemoryController
@@ -13,6 +14,7 @@ from logic_engine.agents.attack_gen import AttackGenerator
 from logic_engine.agents.validator import ValidatorAgent
 from logic_engine.agents.executor import AttackExecutor
 from logic_engine.agents.repro_gen import ReproGenerator
+from logic_engine.agents.discovery import DiscoveryAgent
 from logic_engine.agents.knowledge import KnowledgeAgent
 from interface.memory.projector import KnowledgeProjector
 
@@ -20,6 +22,7 @@ from interface.memory.projector import KnowledgeProjector
 class AgentState(TypedDict):
     task: str
     trace_id: str
+    target_script: str
     context: dict
     attack_hypothesis: dict
     execution_result: dict
@@ -39,6 +42,8 @@ class AgentOrchestrator:
         self.codebase = CodebaseMemoryClient(project_name=project_name)
         # Ensure codebase client knows the root path if it can be inferred
         self.memory = MemoryController(self.db, self.codebase)
+        self.generator = BLMGenerator(db_path=db_path, memory_controller=self.memory)
+        self.discovery_agent = DiscoveryAgent(self.memory)
         self.attack_gen = AttackGenerator(self.memory)
         self.validator = ValidatorAgent()
         self.repro_gen = ReproGenerator()
@@ -53,13 +58,15 @@ class AgentOrchestrator:
 
         # Define Nodes
         workflow.add_node("analyze_trace", self.analyze_trace)
+        workflow.add_node("discovery", self.discovery)
         workflow.add_node("generate_attack", self.generate_attack)
         workflow.add_node("validate_attack", self.validate_attack)
         workflow.add_node("promote_knowledge", self.promote_knowledge)
 
         # Define Edges
         workflow.set_entry_point("analyze_trace")
-        workflow.add_edge("analyze_trace", "generate_attack")
+        workflow.add_edge("analyze_trace", "discovery")
+        workflow.add_edge("discovery", "generate_attack")
         workflow.add_edge("generate_attack", "validate_attack")
         workflow.add_edge("validate_attack", "promote_knowledge")
         workflow.add_edge("promote_knowledge", END)
@@ -106,6 +113,63 @@ class AgentOrchestrator:
         self._log_agent_turn("analyze_trace", state, res)
         return res
 
+    async def discovery(self, state: AgentState):
+        """
+        Agent node: Discovers execution contexts (env, globals) and required setup actions.
+        """
+        trace_id = state["trace_id"]
+        results = await self.discovery_agent.get_contexts(trace_id)
+        
+        setup_actions = results.get("setup_actions", []) if isinstance(results, dict) else []
+        contexts = results.get("contexts", [{}]) if isinstance(results, dict) else results if isinstance(results, list) else [{}]
+
+        if setup_actions:
+            print(f" [*] Discovery Agent identified setup requirements: {setup_actions}")
+            from logic_engine.agents.setup import SetupAgent
+            setup_agent = SetupAgent(self.codebase.root_path)
+            
+            # Use the local runner's base URL
+            base_url = f"http://{self.executor.php_runner.host}:{self.executor.php_runner.port}"
+            setup_results = await setup_agent.execute_actions(setup_actions, base_url=base_url)
+            for sr in setup_results:
+                print(f"  -> {sr}")
+                
+            # If a setup action occurred, we MUST re-run the baseline trace and re-discover
+            target_script = state.get("target_script")
+            if target_script:
+                print(f" [*] Re-running baseline trace on {target_script} after setup...")
+                from datetime import datetime
+                post_setup_trace_id = trace_id + "-post-setup"
+                
+                active_env = contexts[0] if contexts else {}
+                telemetry, _ = self.executor.php_runner.run(target_script, params=active_env, use_http=True, repo_root=self.codebase.root_path)
+                telemetry.update({
+                    "trace_id": post_setup_trace_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "php"
+                })
+                # We need BLMGenerator to ingest this new telemetry
+                await self.generator.ingest(telemetry, action_name=target_script)
+                
+                print(f" [*] Re-running discovery on post-setup trace...")
+                post_results = await self.discovery_agent.get_contexts(post_setup_trace_id)
+                contexts = post_results.get("contexts", [{}]) if isinstance(post_results, dict) else post_results if isinstance(post_results, list) else [{}]
+                
+                # Update the trace_id in state to the new one so attack gen uses the deeper trace
+                state["trace_id"] = post_setup_trace_id
+                
+        # Update state with the first (most likely) context
+        active_env = contexts[0] if contexts else {}
+        state["context"]["active_env"] = active_env
+        
+        res = {
+            "trace_id": state["trace_id"],
+            "context": state["context"],
+            "next_action": "attack"
+        }
+        self._log_agent_turn("discovery", state, res)
+        return res
+
     async def generate_attack(self, state: AgentState):
         """
         Agent node: Synthesizes a logic exploit based on the BLM.
@@ -121,20 +185,33 @@ class AgentOrchestrator:
 
     async def validate_attack(self, state: AgentState):
         """
-        Agent node: Executes the attack and reality-checks the result.
+        Agent node: Executes the attack (including pre-steps) and reality-checks the result.
         """
         hypothesis = state["attack_hypothesis"]
         
-        # Carry over context from baseline trace (e.g., security level)
-        baseline_cookies = state["context"].get("episodic", {}).get("state_data", {}).get("cookies", {})
-        env_context = {}
-        if "security" in baseline_cookies:
-            env_context["security"] = baseline_cookies["security"]
+        # Determine execution context from state
+        # Context might have been set by the scanner or a previous discovery step
+        env_context = state["context"].get("active_env", {})
+        session = state["context"].get("session", {})
 
-        # 1. Execute attack
-        execution_trace = self.executor.execute(hypothesis, env=env_context)
+        # 1. Handle Pre-Steps (State Discovery)
+        if "pre_step" in hypothesis and hypothesis["pre_step"]:
+            print(f" [*] Executing Pre-Step: {hypothesis['pre_step'].get('target_action')}")
+            _, session = self.executor.execute(
+                hypothesis["pre_step"], 
+                repo_root=self.codebase.root_path,
+                env=env_context
+            )
+
+        # 2. Execute Main Attack with session and env
+        execution_trace, _ = self.executor.execute(
+            hypothesis, 
+            session=session, 
+            repo_root=self.codebase.root_path,
+            env=env_context
+        )
         
-        # 2. Validate result
+        # 3. Validate result
         verdict = await self.validator.validate(hypothesis, execution_trace)
         
         repro_script = ""
